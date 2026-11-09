@@ -1,0 +1,30 @@
+[package]
+name = "daml-model-rep-examples"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+submit = { path = "../submit" }
+client = { path = "../client" }
+ledger-api = { path = "../ledger-api" }
+daml-type-rep = { path = "../daml-type-rep" }
+derive-lapi-access = { path = "../derive-lapi-access" }
+codegen = { path = "../codegen" }
+tokio = { workspace = true }
+tonic = { workspace = true }
+clap = { workspace = true }
+uuid = { workspace = true }
+tokio-stream = { workspace = true }
+prost-types = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
+rust_decimal = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+nix = { workspace = true }
+regex = { workspace = true }
+zip = { workspace = true }

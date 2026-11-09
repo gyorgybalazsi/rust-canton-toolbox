@@ -1,0 +1,13 @@
+[package]
+name = "derive-lapi-access"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+ledger-api = { path = "../ledger-api" }
+daml-type-rep = { path = "../daml-type-rep" }

@@ -1,0 +1,33 @@
+{-# LANGUAGE ApplicativeDo #-}
+module Test where
+
+import Daml.Script
+import Main
+
+setup : Script ()
+setup = script do
+  alice <- allocatePartyByHint (PartyIdHint "Alice")
+  ticketWizard <- allocatePartyByHint (PartyIdHint "TicketWizard")
+  scroogeBank <- allocatePartyByHint (PartyIdHint "ScroogeBank")
+
+  aliceId <- validateUserId "aliceuser"
+  ticketWizardId <- validateUserId "ticketwizarduser"
+  scroogeBankId <- validateUserId "scroogebankuser"
+
+  createUser (User aliceId (Some alice)) [CanActAs alice]
+  createUser (User ticketWizardId (Some ticketWizard)) [CanActAs ticketWizard]
+  createUser (User scroogeBankId (Some scroogeBank)) [CanActAs scroogeBank, CanReadAs alice]
+
+  -- Create user for reading as all parties
+  allReaderUserId <- validateUserId "all_reader_user"
+  createUser (User allReaderUserId None) [CanReadAs alice, CanReadAs ticketWizard, CanReadAs scroogeBank]
+
+  cashCid1 <- submit scroogeBank $ createCmd (Cash scroogeBank alice 10.0)
+  offerCid1 <- submit ticketWizard $ createCmd (TicketOffer ticketWizard alice 10.0)
+  submit alice $ exerciseCmd offerCid1 (Accept cashCid1)
+
+  cashCid2 <- submit scroogeBank $ createCmd (Cash scroogeBank alice 20.0)
+  offerCid2 <- submit ticketWizard $ createCmd (TicketOffer ticketWizard alice 20.0)
+  submit alice $ exerciseCmd offerCid2 (Accept cashCid2)
+
+  return ()

@@ -1,0 +1,34 @@
+{-# LANGUAGE ApplicativeDo #-}
+module Test where
+
+import Daml.Script
+import DA.Map (fromList)
+import Main
+
+setup : Script AssetId
+setup = script do
+-- user_setup_begin
+  alice <- allocatePartyByHint (PartyIdHint "Alice")
+  bob <- allocatePartyByHint (PartyIdHint "Bob")
+  aliceId <- validateUserId "alice"
+  bobId <- validateUserId "bob"
+  createUser (User aliceId (Some alice)) [CanActAs alice]
+  createUser (User bobId (Some bob)) [CanActAs bob]
+-- user_setup_end
+
+  aliceTV <- submit alice do
+    createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "TV"
+      price = USD with amount = 100, color = Red
+      color = Green
+      coordinates = Coordinates with x = 10, y = 20, rgb = Rgb with red = 255, green = 0, blue = 0
+      mapping = fromList [("a", 1), ("b", 2), ("c", 3)]
+      maybeDescription = Some "A nice TV"
+
+  bobTV <- submit alice do
+    exerciseCmd aliceTV Give with newOwner = bob
+
+  submit bob do
+    exerciseCmd bobTV Give with newOwner = alice

@@ -1,0 +1,4 @@
+module Main.Types.Address where
+
+data Address = Address { street : Text, city : Text, zip : Text }
+  deriving (Eq, Show)

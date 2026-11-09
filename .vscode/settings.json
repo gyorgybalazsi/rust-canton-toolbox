@@ -1,0 +1,8 @@
+{
+    "rust-analyzer.server.extraEnv": {
+        "PROTOC": "/opt/homebrew/bin/protoc"
+    },
+    "files.readonlyInclude": {
+        "**/.daml/unpacked-dars/**": true
+    }
+}

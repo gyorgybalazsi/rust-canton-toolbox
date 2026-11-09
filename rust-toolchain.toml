@@ -1,0 +1,6 @@
+# Pin the toolchain so local builds and CI use the same Rust version and can't
+# drift (a newer stable can add clippy lints that fail CI but pass locally).
+# Bump deliberately, and keep the CI workflow's dtolnay/rust-toolchain ref in sync.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]

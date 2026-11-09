@@ -1,0 +1,46 @@
+module Main where
+
+import DA.Assert ((===))
+
+template TicketOffer
+  with
+      organizer : Party
+      buyer : Party
+      price : Decimal
+  where
+      signatory organizer
+      -- buyer receives contract via explicit disclosure, not as observer
+      choice Accept : ContractId TicketAgreement
+        with 
+          cashId : ContractId Cash
+        controller buyer
+        do 
+          cash <- fetch cashId
+          cash.amount === price
+          exercise cashId Transfer with
+              newOwner = organizer
+          create TicketAgreement with
+              organizer; owner = buyer
+
+template Cash 
+  with 
+    issuer : Party 
+    owner : Party 
+    amount : Decimal 
+  where 
+    signatory issuer 
+    observer owner
+    nonconsuming choice Transfer : ()
+      with
+        newOwner : Party 
+      controller owner
+      do 
+        create this with owner = newOwner 
+        archive self
+
+template TicketAgreement 
+  with 
+    organizer : Party 
+    owner : Party 
+  where 
+    signatory organizer, owner 

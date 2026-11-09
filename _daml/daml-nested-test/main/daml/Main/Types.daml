@@ -1,0 +1,17 @@
+module Main.Types where
+
+import Main.Types.Address (Address)
+
+data Person = Person { name : Text, age : Int, homeAddress : Address }
+  deriving (Eq, Show)
+
+data Color = Red | Green | Blue
+
+data ShapeData
+  = Circle { radius : Decimal }
+  | Rectangle { width : Decimal, height : Decimal }
+
+data Tree a = Leaf | Node (TreeNode a)
+data TreeNode a = TreeNode { value : a, left : Tree a, right : Tree a }
+
+type People = [Person]

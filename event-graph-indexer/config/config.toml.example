@@ -1,0 +1,112 @@
+# Secret string fields use ${VAR_NAME} placeholders that the loader
+# substitutes from the process environment. Provide the variables with
+# 1Password (`op run --env-file=secrets.env.1password -- <your command>`),
+# a `.env` file, or plain `export`. See README.md ("Secrets") and
+# secrets.env.1password.example for the variable names.
+
+# Active profile (can be overridden with --profile or -p flag)
+active_profile = "local"
+
+[logging]
+level = "info"
+
+[neo4j]
+uri = "neo4j://127.0.0.1:7687"
+user = "neo4j"
+password = "${NEO4J_PASSWORD}"
+# Number of updates to batch before committing to Neo4j (default: 500)
+batch_size = 500
+# Flush timeout in seconds - commit even if batch isn't full (default: 1)
+flush_timeout_secs = 1
+# Idle timeout in seconds - reconnect if no updates received for this duration (default: 60)
+# Canton sends periodic OffsetCheckpoints, so a live stream is never silent for long
+idle_timeout_secs = 60
+
+[storage]
+# Flatten create/choice arguments into dot-separated Neo4j node properties (default: true)
+# When enabled, nested record fields become directly queryable:
+#   MATCH (c:Created) WHERE c.`create_arg.person.homeAddress.city` = 'Zurich' RETURN c
+flatten_arguments = true
+# Maximum recursion depth for flattening nested records (default: 10)
+flatten_max_depth = 10
+# Store raw JSON blobs of arguments as create_arguments_json / choice_argument_json (default: false)
+store_arguments_json = false
+
+# ============================================================================
+# LOCAL PROFILE - For local development with Canton sandbox
+# ============================================================================
+[profiles.local.ledger]
+# User ID for generating fake JWT tokens (used when --use-keycloak is not specified)
+fake_jwt_user = "alice"
+# Party IDs to subscribe to for updates
+# If omitted or empty, parties are auto-discovered from the ledger via ListKnownParties
+# parties = ["Alice::1220..."]
+# Ledger API URL
+url = "http://localhost:6865"
+# Starting offset for sync when Neo4j has no data (optional)
+# Positive value: absolute offset. Negative value: relative to ledger end (e.g., -5000000)
+# If not specified, falls back to ledger pruning offset
+# starting_offset = -5000000
+
+# Local profile typically doesn't need Keycloak
+# [profiles.local.keycloak]
+
+# ============================================================================
+# DEVNET PROFILE - Example for a development network
+# ============================================================================
+[profiles.devnet.ledger]
+fake_jwt_user = "service-account"
+parties = [
+    "party1::1220abc...",
+    "party2::1220def..."
+]
+url = "https://devnet.example.com:5001"
+# starting_offset = 12345
+
+# Client Credentials Flow (for service accounts)
+[profiles.devnet.keycloak]
+client_id = "your-service-account-client-id"
+token_endpoint = "https://keycloak.devnet.example.com/auth/realms/your-realm/protocol/openid-connect/token"
+grant_type = "client_credentials"
+client_secret = "${DEVNET_CLIENT_SECRET}"
+
+# ============================================================================
+# MAINNET PROFILE - Example for production network
+# ============================================================================
+[profiles.mainnet.ledger]
+fake_jwt_user = "unused"
+parties = [
+    "production-party::1220..."
+]
+url = "https://mainnet.example.com:5001"
+starting_offset = 1000000
+
+[profiles.mainnet.keycloak]
+client_id = "production-reader"
+token_endpoint = "https://keycloak.mainnet.example.com/auth/realms/production/protocol/openid-connect/token"
+grant_type = "client_credentials"
+client_secret = "${MAINNET_CLIENT_SECRET}"
+
+# ============================================================================
+# Keycloak Authentication Options
+# ============================================================================
+#
+# OPTION 1: Client Credentials Flow (for service accounts / machine-to-machine)
+# Use this when you have a service account with client_id and client_secret
+#
+# [profiles.myprofile.keycloak]
+# client_id = "your-service-account-client-id"
+# token_endpoint = "https://keycloak.example.com/auth/realms/your-realm/protocol/openid-connect/token"
+# grant_type = "client_credentials"
+# client_secret = "${YOUR_CLIENT_SECRET}"
+#
+# OPTION 2: Password Flow (for user authentication)
+# Use this when authenticating as a specific user with username/password
+#
+# [profiles.myprofile.keycloak]
+# client_id = "your-client-id"
+# token_endpoint = "https://keycloak.example.com/auth/realms/your-realm/protocol/openid-connect/token"
+# grant_type = "password"
+# username = "your-username"
+# password = "${YOUR_PASSWORD}"
+# # client_secret = "${YOUR_CLIENT_SECRET}"  # Only needed if client requires authentication

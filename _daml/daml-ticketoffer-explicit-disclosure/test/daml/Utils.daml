@@ -1,0 +1,14 @@
+module Utils where
+
+import Daml.Script
+
+-- | Submit commands with the actAs and readAs claims granted to a user,
+-- combined with explicit disclosures.
+-- May throw UserNotFound.
+submitUserWithDisclosures : UserId -> [Disclosure] -> Commands a -> Script a
+submitUserWithDisclosures userId disclosures cmds = do
+  rights <- listUserRights userId
+  let actAsParties = [p | CanActAs p <- rights]
+      readAsParties = [p | CanReadAs p <- rights]
+      disclosureOptions = mconcat (map disclose disclosures)
+  submit (actAs actAsParties <> readAs readAsParties <> disclosureOptions) cmds

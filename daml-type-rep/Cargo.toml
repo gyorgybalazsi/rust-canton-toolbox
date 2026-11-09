@@ -1,0 +1,10 @@
+[package]
+name = "daml-type-rep"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = {workspace = true}
+rust_decimal = {workspace = true}
+serde = {workspace = true}
+ledger-api = {path = '../ledger-api'}

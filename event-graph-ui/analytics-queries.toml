@@ -1,0 +1,11 @@
+[[query]]
+label = "Created per offset"
+cypher = "MATCH (c:Created) WHERE c.offset >= $min_off AND c.offset <= $max_off RETURN c.offset AS offset, count(c) AS value ORDER BY offset"
+
+[[query]]
+label = "Exercised per offset"
+cypher = "MATCH (x:Exercised) WHERE x.offset >= $min_off AND x.offset <= $max_off RETURN x.offset AS offset, count(x) AS value ORDER BY offset"
+
+[[query]]
+label = "Active Contract Set"
+cypher = "OPTIONAL MATCH (cb:Created) WHERE (cb.offset = -1 OR (cb.offset >= 0 AND cb.offset < $min_off)) AND NOT EXISTS { MATCH (xb:Exercised)-[:CONSUMES]->(cb) WHERE xb.offset < $min_off } WITH count(cb) AS baseline MATCH (tx:Transaction) WHERE tx.offset >= $min_off AND tx.offset <= $max_off WITH baseline, tx.offset AS offset ORDER BY offset OPTIONAL MATCH (c:Created) WHERE c.offset = offset WITH baseline, offset, count(c) AS created OPTIONAL MATCH (x:Exercised)-[:CONSUMES]->(:Created) WHERE x.offset = offset WITH baseline, offset, created, count(x) AS consumed WITH baseline, offset, created - consumed AS delta ORDER BY offset WITH baseline, collect({offset: offset, delta: delta}) AS rows UNWIND range(0, size(rows)-1) AS i RETURN rows[i].offset AS offset, baseline + reduce(s=0, j IN range(0,i) | s + rows[j].delta) AS value ORDER BY offset"

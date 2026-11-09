@@ -1,0 +1,48 @@
+module Main where
+
+import DA.Map (Map)
+
+type AssetId = ContractId Asset
+
+-- In Daml, this is called "variant"
+-- In Rust, this is called "enum"
+-- In Rust, one branch of an enum is called "variant"
+data Price = USD with amount : Int, color: Color
+           | EUR with amount : Int, color: Color
+           | GBP
+  deriving (Eq, Show)
+
+-- In Daml, this is called "enum"
+-- In Rust, the Daml "enum", just like the Daml "variant", is called "enum"
+data Color = Red | Green | Blue
+  deriving (Eq, Show)
+
+data Coordinates = Coordinates with x : Int, y : Int, rgb : Rgb
+  deriving (Eq, Show)
+
+data Rgb = Rgb with red : Int, green : Int, blue : Int
+  deriving (Eq, Show)
+
+template Asset
+  with
+    issuer : Party
+    owner  : Party
+    name   : Text
+    price : Price
+    color : Color
+    coordinates : Coordinates
+    mapping : Map Text Int
+    maybeDescription : Optional Text
+  where
+    ensure name /= ""
+    signatory issuer
+    observer owner
+    choice Give : AssetId
+      with
+        newOwner : Party
+      controller owner
+      do create this with
+           owner = newOwner
+    nonconsuming choice GetView: Asset
+      controller owner
+      do return this

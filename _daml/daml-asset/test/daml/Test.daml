@@ -1,0 +1,102 @@
+{-# LANGUAGE ApplicativeDo #-}
+module Test where
+
+import Daml.Script
+import DA.Time (seconds)
+import Main
+
+setup : Script AssetId
+setup = script do
+-- user_setup_begin
+  alice <- allocatePartyByHint (PartyIdHint "Alice")
+  bob <- allocatePartyByHint (PartyIdHint "Bob")
+  aliceId <- validateUserId "alice"
+  bobId <- validateUserId "bob"
+  createUser (User aliceId (Some alice)) [CanActAs alice]
+  createUser (User bobId (Some bob)) [CanActAs bob]
+-- user_setup_end
+
+  -- Create 2 assets (total: 2)
+  (aliceTV1, aliceTV2) <- submit alice do
+    tv1 <- createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "TV1"
+    tv2 <- createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "TV2"
+    pure (tv1, tv2)
+
+  sleep (seconds 5)
+
+  -- Create 2 more assets (total: 4)
+  (alicePhone, aliceLaptop) <- submit alice do
+    phone <- createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "Phone"
+    laptop <- createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "Laptop"
+    pure (phone, laptop)
+
+  sleep (seconds 5)
+
+  -- Archive 1 asset (total: 3)
+  submit alice do
+    archiveCmd aliceTV2
+
+  sleep (seconds 5)
+
+  -- Give TV1 to Bob (archives old, creates new - total stays 3)
+  bobTV <- submit alice do
+    exerciseCmd aliceTV1 Give with newOwner = bob
+
+  sleep (seconds 5)
+
+  -- Create 1 asset for Bob (total: 4)
+  bobCar <- submit bob do
+    createCmd Asset with
+      issuer = bob
+      owner = bob
+      name = "Car"
+
+  sleep (seconds 5)
+
+  -- Archive laptop (total: 3)
+  submit alice do
+    archiveCmd aliceLaptop
+
+  sleep (seconds 5)
+
+  -- Bob gives TV back to Alice (total stays 3)
+  submit bob do
+    exerciseCmd bobTV Give with newOwner = alice
+
+  sleep (seconds 5)
+
+  -- Create 1 more asset (total: 4)
+  submit alice do
+    createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "Tablet"
+
+  sleep (seconds 5)
+
+  -- Create 1 more asset (total: 5)
+  submit alice do
+    createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "Watch"
+
+  sleep (seconds 5)
+
+  -- Archive Bob's car (total: 4)
+  submit bob do
+    archiveCmd bobCar
+
+  pure alicePhone

@@ -1,0 +1,17 @@
+[package]
+name = "submit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+client = { path = "../client" }
+ledger-api = { path = "../ledger-api" }
+daml-type-rep = { path = "../daml-type-rep" }
+derive-lapi-access = { path = "../derive-lapi-access" }
+tonic = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }

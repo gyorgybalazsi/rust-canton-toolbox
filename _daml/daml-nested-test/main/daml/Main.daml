@@ -1,0 +1,18 @@
+module Main where
+
+import Main.Types (Person)
+
+type RegistryId = ContractId Registry
+
+template Registry
+  with
+    admin : Party
+    person : Person
+  where
+    signatory admin
+    choice UpdatePerson : ContractId Registry
+      with
+        newPerson : Person
+      controller admin
+      do
+        create this with person = newPerson

@@ -1,0 +1,27 @@
+[package]
+name = "codegen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+prost = {workspace = true}
+zip = {workspace = true}
+anyhow = {workspace = true}
+ledger-api = { path = "../ledger-api" }
+daml-type-rep = { path = "../daml-type-rep" }
+proc-macro2 = {workspace = true}
+quote = {workspace = true}
+syn = {workspace = true}
+prettyplease = {workspace = true}
+tracing = {workspace = true}
+tracing-subscriber = {workspace = true}
+clap = {workspace = true}
+
+[build-dependencies]
+prost = {workspace = true}
+prost-build = {workspace = true}
+prost-types = {workspace = true}
+zip = {workspace = true}
+
+[features]
+no-generated = []

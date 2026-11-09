@@ -1,0 +1,5 @@
+packages:
+  - ./daml-asset
+  - ./daml-optional
+  - ./daml-ticketoffer
+  - ./full
