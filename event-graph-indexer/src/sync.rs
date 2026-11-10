@@ -1,15 +1,18 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ledger_api::v2::Identifier;
-use neo4rs::{ConfigBuilder, Graph, query};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
-use crate::config::TemplateFilterConfig;
-use crate::cypher;
-use crate::graph::{StreamExit, apply_cypher_vec_stream_to_neo4j, get_last_processed_offset};
+use crate::config::{DbConfig, TemplateFilterConfig};
+use crate::model;
+use crate::store::Store;
+use crate::writer::{
+    AcsLoadState, StreamExit, StreamSettings, acs_floor, apply_batch_stream, decide_acs_load,
+    is_pruning_error,
+};
 use chrono::{Duration as ChronoDuration, Utc};
 use client::active_contracts::stream_active_contracts;
 use client::jwt::{TokenManager, TokenSource};
@@ -20,26 +23,19 @@ use client::stream_updates::stream_updates;
 pub struct SyncConfig {
     pub ledger_url: String,
     pub parties: Vec<String>,
-    pub neo4j_uri: String,
-    pub neo4j_user: String,
-    pub neo4j_pass: String,
+    /// SurrealDB connection settings.
+    pub db: DbConfig,
     /// Optional list of contract templates to filter on.
     /// If empty or None, all templates are included.
     pub template_filters: Option<Vec<TemplateFilterConfig>>,
-    /// Starting offset when Neo4j has no data. If None, falls back to pruning offset.
+    /// Starting offset when the database has no data. If None, falls back to pruning offset.
     pub starting_offset: Option<i64>,
-    /// Number of updates to batch before committing to Neo4j
+    /// Number of updates to batch per SurrealDB transaction
     pub batch_size: usize,
     /// Flush timeout in seconds - commit even if batch isn't full after this duration
     pub flush_timeout_secs: u64,
     /// Idle timeout in seconds - reconnect if no updates received for this duration
     pub idle_timeout_secs: u64,
-    /// Flatten create/choice arguments into dot-separated Neo4j node properties
-    pub flatten_arguments: bool,
-    /// Maximum recursion depth for flattening nested records
-    pub flatten_max_depth: usize,
-    /// Store raw JSON blob of arguments as Neo4j properties
-    pub store_arguments_json: bool,
 }
 
 impl SyncConfig {
@@ -75,67 +71,31 @@ impl Default for BackoffConfig {
     }
 }
 
-/// Ensures required indexes exist in Neo4j for optimal query performance.
-/// Creates indexes if they don't exist (idempotent).
-async fn ensure_indexes(neo4j_uri: &str, neo4j_user: &str, neo4j_pass: &str) -> Result<()> {
-    info!("Ensuring Neo4j indexes exist...");
-    let graph = Graph::new(neo4j_uri, neo4j_user, neo4j_pass)?;
-
-    let indexes = [
-        "CREATE INDEX created_contract_id IF NOT EXISTS FOR (c:Created) ON (c.contract_id)",
-        "CREATE INDEX created_offset_node IF NOT EXISTS FOR (c:Created) ON (c.offset, c.node_id)",
-        "CREATE INDEX created_offset IF NOT EXISTS FOR (c:Created) ON (c.offset)",
-        "CREATE INDEX created_template_name IF NOT EXISTS FOR (c:Created) ON (c.template_name)",
-        "CREATE INDEX exercised_offset_node IF NOT EXISTS FOR (e:Exercised) ON (e.offset, e.node_id)",
-        "CREATE INDEX exercised_choice_name IF NOT EXISTS FOR (e:Exercised) ON (e.choice_name)",
-        "CREATE INDEX transaction_offset IF NOT EXISTS FOR (t:Transaction) ON (t.offset)",
-        "CREATE INDEX transaction_id_idx IF NOT EXISTS FOR (t:Transaction) ON (t.transaction_id)",
-        "CREATE INDEX party_id IF NOT EXISTS FOR (p:Party) ON (p.party_id)",
-    ];
-
-    for index_query in &indexes {
-        match graph.run(query(index_query)).await {
-            Ok(_) => debug!("Index ensured: {}", index_query),
-            Err(e) => warn!(
-                "Failed to create index (may already exist): {} - {}",
-                index_query, e
-            ),
-        }
-    }
-
-    info!("Neo4j indexes ready");
-    Ok(())
-}
-
-/// Loads the Active Contract Set (ACS) into Neo4j at a specific offset.
+/// Loads the Active Contract Set (ACS) into SurrealDB at a specific offset.
 /// This ensures we have all contracts that were active at that offset before starting to stream updates.
 ///
 /// The offset should be the pruning offset (or start offset for streaming) so that all contracts
-/// that will be archived in the stream already exist as Created nodes.
+/// that will be archived in the stream already exist as `created` records.
 ///
-/// Resumable: persists a continuation token + offset to the (:SyncState) marker after each batch
+/// Resumable: persists a continuation token + offset to the `sync_state:singleton` marker after each batch
 /// so that a crash mid-load can be resumed. Rotates the ACS stream at the token deadline.
-#[allow(clippy::too_many_arguments)] // ledger + neo4j endpoints, auth, and resume params.
-async fn load_acs_to_neo4j(
+#[allow(clippy::too_many_arguments)] // ledger endpoint, store, auth, and resume params.
+async fn load_acs(
     ledger_url: &str,
-    neo4j_uri: &str,
-    neo4j_user: &str,
-    neo4j_pass: &str,
+    store: &Store,
     parties: &[String],
     token_manager: &TokenManager,
     acs_offset: i64,
     mut continuation: Option<Vec<u8>>,
     template_filters: Option<&[Identifier]>,
-    flatten_config: cypher::FlattenConfig,
 ) -> Result<()> {
     info!(
-        "Loading Active Contract Set (ACS) into Neo4j at offset {} (resume={})...",
+        "Loading Active Contract Set (ACS) into SurrealDB at offset {} (resume={})...",
         acs_offset,
         continuation.is_some()
     );
     let start_time = Instant::now();
     let mut contract_count = 0u64;
-    let graph = Graph::new(neo4j_uri, neo4j_user, neo4j_pass)?;
     const BATCH_SIZE: usize = 500;
 
     loop {
@@ -152,28 +112,25 @@ async fn load_acs_to_neo4j(
         let rotation_timer = tokio::time::sleep_until(rotation_at.into());
         tokio::pin!(rotation_timer);
 
-        let mut batch: Vec<neo4rs::Query> = Vec::new();
+        let mut batch = model::WriteBatch::default();
 
         loop {
             tokio::select! {
                 _ = &mut rotation_timer => { break; }
                 item = acs_stream.next() => match item {
                     Some(Ok((contract, cont_tok))) => {
-                        let queries = cypher::created_event_to_cypher(&contract.created_event, flatten_config);
-                        batch.extend(queries.into_iter().map(|cq| cq.query));
+                        batch.extend(model::acs_created_to_batch(&contract.created_event));
                         contract_count += 1;
                         if cont_tok.is_some() { continuation = cont_tok; }
-                        if batch.len() >= BATCH_SIZE {
+                        if batch.created.len() >= BATCH_SIZE {
                             let to_commit = std::mem::take(&mut batch);
-                            crate::graph::commit_acs_batch_and_marker(&graph, to_commit, acs_offset, continuation.clone())
-                                .await.map_err(|e| anyhow::anyhow!("ACS batch commit failed: {}", e))?;
+                            store.write_acs_batch(&to_commit, acs_offset, continuation.clone(), false).await?;
                         }
                     }
                     Some(Err(e)) => return Err(e),
                     None => {
                         let to_commit = std::mem::take(&mut batch);
-                        crate::graph::mark_acs_complete(&graph, to_commit, acs_offset)
-                            .await.map_err(|e| anyhow::anyhow!("ACS completion commit failed: {}", e))?;
+                        store.write_acs_batch(&to_commit, acs_offset, None, true).await?;
                         let elapsed = start_time.elapsed();
                         info!("ACS loading complete: {} contracts in {:.2}s at offset {}", contract_count, elapsed.as_secs_f64(), acs_offset);
                         return Ok(());
@@ -184,14 +141,9 @@ async fn load_acs_to_neo4j(
 
         // Reaching here means the rotation timer fired (the None/Err arms return).
         let to_commit = std::mem::take(&mut batch);
-        crate::graph::commit_acs_batch_and_marker(
-            &graph,
-            to_commit,
-            acs_offset,
-            continuation.clone(),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("ACS rotation flush failed: {}", e))?;
+        store
+            .write_acs_batch(&to_commit, acs_offset, continuation.clone(), false)
+            .await?;
         info!("Rotating ACS stream ahead of token expiry; resuming from continuation token");
         continue;
     }
@@ -202,11 +154,11 @@ async fn load_acs_to_neo4j(
 /// On the first fresh iteration, the explorer commits to a starting offset
 /// (used as the anchor for the ACS load). On any subsequent retry — token
 /// refresh, transport error, etc. — the stream should resume from wherever
-/// Neo4j actually is, not the original anchor; otherwise the explorer
+/// SurrealDB actually is, not the original anchor; otherwise the explorer
 /// re-streams offsets it already committed (idempotent `MERGE`s, but no
 /// progress and `max(t.offset)` appears stalled).
-fn resume_offset_after_fresh(initial: i64, neo4j_max: Option<i64>) -> i64 {
-    match neo4j_max {
+fn resume_offset_after_fresh(initial: i64, db_max: Option<i64>) -> i64 {
+    match db_max {
         Some(n) if n > initial => n,
         _ => initial,
     }
@@ -351,44 +303,11 @@ async fn resolve_offset_days_ago(
     Ok(lo)
 }
 
-/// Clears all data from Neo4j by atomically dropping and recreating the `neo4j`
-/// database via the `system` database. This is O(seconds) regardless of data
-/// size and avoids the page-cache / undo-log pressure of a graph-level delete
-/// (which on 44GB-scale datasets has been observed to hang for hours).
-///
-/// Requires Neo4j Enterprise (Neo4j Desktop is enterprise) and a connecting
-/// user with the CREATE DATABASE privilege. The default `neo4j` user has it.
-/// We fail fast with a clear message if the DDL is rejected — no silent
-/// fallback to the slow graph-traversal delete.
-async fn clear_neo4j_database(neo4j_uri: &str, neo4j_user: &str, neo4j_pass: &str) -> Result<()> {
-    info!("Clearing Neo4j database via CREATE OR REPLACE DATABASE neo4j (fast, atomic)...");
-    let config = ConfigBuilder::new()
-        .uri(neo4j_uri)
-        .user(neo4j_user)
-        .password(neo4j_pass)
-        .db("system")
-        .build()
-        .context("failed to build system-db config for CREATE OR REPLACE DATABASE")?;
-    let graph = Graph::connect(config)
-        .context("failed to connect to system database for CREATE OR REPLACE DATABASE")?;
-    graph
-        .run(query("CREATE OR REPLACE DATABASE neo4j WAIT"))
-        .await
-        .context(
-            "CREATE OR REPLACE DATABASE neo4j failed. Requires Neo4j Enterprise and the \
-             connecting user must have the CREATE DATABASE privilege. If you're on Community \
-             Edition or a restricted user, drop and recreate the `neo4j` database via Neo4j \
-             Desktop's UI instead.",
-        )?;
-    info!("Neo4j `neo4j` database recreated (empty)");
-    Ok(())
-}
-
 /// Runs the sync process with automatic reconnection and token refresh.
 ///
 /// This function will:
 /// 1. Load the Active Contract Set (ACS) if not already loaded
-/// 2. Query Neo4j for the last processed offset (resume point)
+/// 2. Query SurrealDB for the last processed offset (resume point)
 /// 3. Start streaming from that offset
 /// 4. On stream errors, reconnect with exponential backoff
 /// 5. Proactively refresh JWT tokens before they expire
@@ -404,29 +323,14 @@ pub async fn run_resilient_sync(
     fresh: bool,
     from_days_ago: Option<u32>,
 ) -> Result<()> {
-    // If fresh start, clear the database first
+    // One shared connection for the whole run. Defines the schema on connect
+    // and waits (with backoff) while the server is unreachable.
+    let store = Store::connect_with_retry(&sync_config.db).await;
+
+    // If fresh start, clear the indexer's data first
     if fresh {
-        clear_neo4j_database(
-            &sync_config.neo4j_uri,
-            &sync_config.neo4j_user,
-            &sync_config.neo4j_pass,
-        )
-        .await?;
+        store.clear_all().await?;
     }
-
-    // Ensure indexes exist before starting sync
-    ensure_indexes(
-        &sync_config.neo4j_uri,
-        &sync_config.neo4j_user,
-        &sync_config.neo4j_pass,
-    )
-    .await?;
-
-    let flatten_config = cypher::FlattenConfig {
-        enabled: sync_config.flatten_arguments,
-        max_depth: sync_config.flatten_max_depth,
-        store_arguments_json: sync_config.store_arguments_json,
-    };
 
     let token_manager = Arc::new(TokenManager::new(token_source));
 
@@ -436,16 +340,14 @@ pub async fn run_resilient_sync(
     info!("Started background JWT token refresh");
 
     // Start background offset progress logger with ETA
-    let neo4j_uri_clone = sync_config.neo4j_uri.clone();
-    let neo4j_user_clone = sync_config.neo4j_user.clone();
-    let neo4j_pass_clone = sync_config.neo4j_pass.clone();
+    let progress_store = store.clone();
     let ledger_url_clone = sync_config.ledger_url.clone();
     let token_manager_for_progress = Arc::clone(&token_manager);
     let _progress_handle = tokio::spawn(async move {
         // `remaining <= CAUGHT_UP_THRESHOLD` => we've drained the backlog and are
         // tracking live mainnet. The transition is logged exactly once until
         // `remaining` grows past FELL_BEHIND_THRESHOLD (a big backlog appeared,
-        // e.g. Neo4j was restarted), at which point the flag resets and the next
+        // e.g. SurrealDB was restarted), at which point the flag resets and the next
         // catch-up is logged again.
         const CAUGHT_UP_THRESHOLD: i64 = 1000;
         const FELL_BEHIND_THRESHOLD: i64 = CAUGHT_UP_THRESHOLD * 100;
@@ -456,20 +358,14 @@ pub async fn run_resilient_sync(
         loop {
             tokio::time::sleep(Duration::from_secs(300)).await; // 5 minutes
 
-            let current_offset = match get_last_processed_offset(
-                &neo4j_uri_clone,
-                &neo4j_user_clone,
-                &neo4j_pass_clone,
-            )
-            .await
-            {
+            let current_offset = match progress_store.last_processed_offset().await {
                 Ok(Some(offset)) => offset,
                 Ok(None) => {
-                    info!("[Progress] No offset data in Neo4j yet");
+                    info!("[Progress] No offset data in SurrealDB yet");
                     continue;
                 }
                 Err(e) => {
-                    warn!("[Progress] Failed to query Neo4j offset: {}", e);
+                    warn!("[Progress] Failed to query SurrealDB offset: {}", e);
                     continue;
                 }
             };
@@ -516,7 +412,10 @@ pub async fn run_resilient_sync(
                 "calculating...".to_string()
             };
 
-            info!("[Progress] Neo4j offset: {}, {}", current_offset, rate_info);
+            info!(
+                "[Progress] SurrealDB offset: {}, {}",
+                current_offset, rate_info
+            );
 
             // Catch-up transition: log once when remaining first drops to within
             // CAUGHT_UP_THRESHOLD; allow re-logging if we fall significantly behind.
@@ -663,40 +562,27 @@ pub async fn run_resilient_sync(
             }
         } else if let Some(initial_offset) = fresh_start_offset {
             // Initial offset was pinned on the first fresh iteration to anchor
-            // the ACS load. For the update stream on retry, resume from Neo4j's
+            // the ACS load. For the update stream on retry, resume from SurrealDB's
             // committed max offset if it's further along — otherwise the
             // explorer re-streams offsets already processed and progress stalls.
-            let neo4j_max = get_last_processed_offset(
-                &sync_config.neo4j_uri,
-                &sync_config.neo4j_user,
-                &sync_config.neo4j_pass,
-            )
-            .await
-            .ok()
-            .flatten();
-            let resume = resume_offset_after_fresh(initial_offset, neo4j_max);
+            let db_max = store.last_processed_offset().await.ok().flatten();
+            let resume = resume_offset_after_fresh(initial_offset, db_max);
             if resume != initial_offset {
                 info!(
-                    "Fresh retry: resuming from Neo4j max offset {} (anchor was {})",
+                    "Fresh retry: resuming from SurrealDB max offset {} (anchor was {})",
                     resume, initial_offset
                 );
             }
             resume
         } else {
-            // Normal mode: check Neo4j for resume point
-            match get_last_processed_offset(
-                &sync_config.neo4j_uri,
-                &sync_config.neo4j_user,
-                &sync_config.neo4j_pass,
-            )
-            .await
-            {
+            // Normal mode: check SurrealDB for resume point
+            match store.last_processed_offset().await {
                 Ok(Some(offset)) => {
-                    info!("Resuming from Neo4j offset: {}", offset);
+                    info!("Resuming from SurrealDB offset: {}", offset);
                     offset
                 }
                 Ok(None) => {
-                    // No data in Neo4j, use configured starting_offset or fall back to pruning offset
+                    // No data in SurrealDB, use configured starting_offset or fall back to pruning offset
                     // Negative starting_offset means relative to ledger end (e.g., -5000000 = 5M before end)
                     if let Some(configured_offset) = sync_config.starting_offset {
                         if configured_offset < 0 {
@@ -704,7 +590,7 @@ pub async fn run_resilient_sync(
                                 Ok(ledger_end) => {
                                     let resolved = (ledger_end + configured_offset).max(0);
                                     info!(
-                                        "No existing data in Neo4j, starting from ledger_end ({}) {} = {}",
+                                        "No existing data in SurrealDB, starting from ledger_end ({}) {} = {}",
                                         ledger_end, configured_offset, resolved
                                     );
                                     resolved
@@ -719,7 +605,7 @@ pub async fn run_resilient_sync(
                             }
                         } else {
                             info!(
-                                "No existing data in Neo4j, starting from configured starting_offset: {}",
+                                "No existing data in SurrealDB, starting from configured starting_offset: {}",
                                 configured_offset
                             );
                             configured_offset
@@ -728,7 +614,7 @@ pub async fn run_resilient_sync(
                         match get_pruning_offset(&sync_config.ledger_url, Some(&token)).await {
                             Ok(pruning_offset) => {
                                 info!(
-                                    "No existing data in Neo4j, starting from ledger pruning offset: {}",
+                                    "No existing data in SurrealDB, starting from ledger pruning offset: {}",
                                     pruning_offset
                                 );
                                 pruning_offset
@@ -745,7 +631,7 @@ pub async fn run_resilient_sync(
                 }
                 Err(e) => {
                     warn!(
-                        "Failed to query Neo4j for last offset: {}. Querying ledger for pruning offset",
+                        "Failed to query SurrealDB for last offset: {}. Querying ledger for pruning offset",
                         e
                     );
                     match get_pruning_offset(&sync_config.ledger_url, Some(&token)).await {
@@ -770,31 +656,22 @@ pub async fn run_resilient_sync(
 
         // Load ACS on first run if not already loaded (at the starting offset)
         if !acs_loaded_checked {
-            let marker = crate::graph::read_acs_marker(
-                &sync_config.neo4j_uri,
-                &sync_config.neo4j_user,
-                &sync_config.neo4j_pass,
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to read ACS marker: {}", e))?;
-            match crate::graph::decide_acs_load(marker) {
-                crate::graph::AcsLoadState::Skip => {
+            let marker = store.read_acs_marker().await?;
+            match decide_acs_load(marker) {
+                AcsLoadState::Skip => {
                     info!("ACS already complete (marker), skipping ACS load");
                     acs_loaded_checked = true;
                 }
-                crate::graph::AcsLoadState::Fresh => {
+                AcsLoadState::Fresh => {
                     info!("ACS not loaded, loading fresh at offset {}", begin_offset);
-                    match load_acs_to_neo4j(
+                    match load_acs(
                         &sync_config.ledger_url,
-                        &sync_config.neo4j_uri,
-                        &sync_config.neo4j_user,
-                        &sync_config.neo4j_pass,
+                        &store,
                         &sync_config.parties,
                         &token_manager,
                         begin_offset,
                         None,
                         template_identifiers.as_deref(),
-                        flatten_config,
                     )
                     .await
                     {
@@ -815,22 +692,19 @@ pub async fn run_resilient_sync(
                         }
                     }
                 }
-                crate::graph::AcsLoadState::Resume {
+                AcsLoadState::Resume {
                     acs_offset,
                     continuation,
                 } => {
                     info!("Resuming incomplete ACS load at offset {}", acs_offset);
-                    match load_acs_to_neo4j(
+                    match load_acs(
                         &sync_config.ledger_url,
-                        &sync_config.neo4j_uri,
-                        &sync_config.neo4j_user,
-                        &sync_config.neo4j_pass,
+                        &store,
                         &sync_config.parties,
                         &token_manager,
                         acs_offset,
                         continuation,
                         template_identifiers.as_deref(),
-                        flatten_config,
                     )
                     .await
                     {
@@ -839,18 +713,12 @@ pub async fn run_resilient_sync(
                             acs_loaded_checked = true;
                         }
                         Err(e) => {
-                            if crate::graph::is_pruning_error(&e) {
+                            if is_pruning_error(&e) {
                                 warn!(
                                     "ACS resume rejected (participant pruned past snapshot offset): {}. Clearing marker + from_acs nodes and restarting fresh.",
                                     e
                                 );
-                                if let Err(re) = crate::graph::reset_acs_state(
-                                    &sync_config.neo4j_uri,
-                                    &sync_config.neo4j_user,
-                                    &sync_config.neo4j_pass,
-                                )
-                                .await
-                                {
+                                if let Err(re) = store.reset_acs_state().await {
                                     error!("Failed to reset ACS state after pruning: {}", re);
                                 }
                                 // leave acs_loaded_checked = false so the next iteration re-evaluates
@@ -878,16 +746,13 @@ pub async fn run_resilient_sync(
         // G3: never start the update stream before the ACS snapshot offset,
         // even when no Transaction nodes exist yet.
         let begin_offset = {
-            let marker_offset = crate::graph::read_acs_marker(
-                &sync_config.neo4j_uri,
-                &sync_config.neo4j_user,
-                &sync_config.neo4j_pass,
-            )
-            .await
-            .ok()
-            .flatten()
-            .map(|m| m.acs_offset);
-            crate::graph::acs_floor(Some(begin_offset), marker_offset).unwrap_or(begin_offset)
+            let marker_offset = store
+                .read_acs_marker()
+                .await
+                .ok()
+                .flatten()
+                .map(|m| m.acs_offset);
+            acs_floor(Some(begin_offset), marker_offset).unwrap_or(begin_offset)
         };
 
         info!(
@@ -931,7 +796,7 @@ pub async fn run_resilient_sync(
 
         // Process the stream - take items while they're Ok, stop on first error
         // This allows us to gracefully reconnect when token expires
-        let cypher_stream = update_stream
+        let batch_stream = update_stream
             .take_while(|update| {
                 match update {
                     Ok(_) => true,
@@ -953,37 +818,32 @@ pub async fn run_resilient_sync(
                     }
                 });
                 debug!(offset = ?offset, "Processing update from stream");
-                cypher::get_updates_response_to_cypher(&response, flatten_config)
+                model::update_to_batch(&response)
             });
 
-        // Apply to Neo4j - this will return when the stream ends or errors
-        match apply_cypher_vec_stream_to_neo4j(
-            &sync_config.neo4j_uri,
-            &sync_config.neo4j_user,
-            &sync_config.neo4j_pass,
-            cypher_stream,
-            sync_config.batch_size,
-            sync_config.flush_timeout_secs,
-            sync_config.idle_timeout_secs,
-            Some(rotation_at),
-        )
-        .await
-        {
-            Ok((before, after, time, exit)) => {
+        // Apply to SurrealDB - this will return when the stream ends or errors
+        let settings = StreamSettings {
+            batch_size: sync_config.batch_size,
+            flush_timeout: Duration::from_secs(sync_config.flush_timeout_secs),
+            idle_timeout: Duration::from_secs(sync_config.idle_timeout_secs),
+            rotation_deadline: Some(rotation_at),
+        };
+        match apply_batch_stream(&store, batch_stream, settings).await {
+            Ok(outcome) => {
                 info!(
-                    "Stream processing completed. Offset {} -> {}, took {} ms",
-                    before.unwrap_or(-1),
-                    after.unwrap_or(-1),
-                    time
+                    "Stream processing completed. Offset {} -> {}, took {:?}",
+                    outcome.before_offset.unwrap_or(-1),
+                    outcome.after_offset.unwrap_or(-1),
+                    outcome.elapsed
                 );
-                match exit {
+                match outcome.exit {
                     StreamExit::Rotated => {
                         info!(
                             "Rotating update stream ahead of token expiry (reached rotation deadline)"
                         );
                         current_delay = backoff_config.initial_delay; // planned, not a failure
                         consecutive_failures = 0;
-                        // loop immediately: fresh (token, rotation_at), resume from Neo4j offset
+                        // loop immediately: fresh (token, rotation_at), resume from SurrealDB offset
                     }
                     StreamExit::Ended => {
                         info!(
@@ -1017,25 +877,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resume_uses_initial_when_neo4j_empty() {
+    fn resume_uses_initial_when_db_empty() {
         assert_eq!(resume_offset_after_fresh(100, None), 100);
     }
 
     #[test]
-    fn resume_uses_initial_when_neo4j_behind() {
-        // Neo4j max is lower than the anchor — possible if data was cleared
+    fn resume_uses_initial_when_db_behind() {
+        // SurrealDB max is lower than the anchor — possible if data was cleared
         // but anchor was already set; trust the anchor.
         assert_eq!(resume_offset_after_fresh(100, Some(50)), 100);
     }
 
     #[test]
-    fn resume_uses_initial_when_neo4j_equal() {
+    fn resume_uses_initial_when_db_equal() {
         // No new progress past the anchor; nothing to advance to.
         assert_eq!(resume_offset_after_fresh(100, Some(100)), 100);
     }
 
     #[test]
-    fn resume_advances_to_neo4j_when_ahead() {
+    fn resume_advances_to_db_when_ahead() {
         // The real fix path: previous iteration made progress; subsequent
         // retry resumes from there instead of restarting at the anchor.
         assert_eq!(resume_offset_after_fresh(100, Some(250)), 250);

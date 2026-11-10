@@ -8,8 +8,8 @@ test, and land changes.
 ## What this is
 
 A Rust workspace for interacting with Canton/Daml ledgers: streaming events,
-generating Rust types from Daml models, submitting commands, and syncing/visualizing
-ledger state in Neo4j. Rust is a deliberately unsupported client language here —
+generating Rust types from Daml models, submitting commands, and syncing the
+ledger event graph into SurrealDB. Rust is a deliberately unsupported client language here —
 the point is to understand the Ledger API and `.dalf` encoding from scratch.
 
 ## Workspace map
@@ -24,8 +24,7 @@ the point is to understand the Ledger API and `.dalf` encoding from scratch.
 | `submit` | Command submission helpers (`create_contract`, `exercise_choice`). |
 | `sandbox-init` | Starts a Daml sandbox, uploads DARs, runs an init script. |
 | `test` (`daml-model-rep-examples`) | Hand-written **integration** examples that exercise generated types against a live sandbox. |
-| `event-graph-indexer` | CLI that syncs ACS/updates into Neo4j (Keycloak auth, 1Password). |
-| `event-graph-ui` | Dioxus UI visualizing the event graph (needs Neo4j). |
+| `event-graph-indexer` | CLI that syncs ACS/updates into a SurrealDB server (Keycloak auth, 1Password). |
 | `wallet` | Placeholder crate (stub). |
 
 ## Build quirks (read before touching the build)
@@ -53,15 +52,16 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 
 Reproduce it locally before pushing — the `/rust-ci` skill does exactly this.
 Keep clippy clean; for generated code or intentional patterns use a scoped,
-commented `#[allow(...)]` (see `ledger-api/src/lib.rs`, `test/src/lib.rs`,
-`event-graph-ui/src/main.rs`).
+commented `#[allow(...)]` (see `ledger-api/src/lib.rs`, `test/src/lib.rs`).
 
 ## Tests
 
 `cargo test --no-run` only **compiles** tests. The integration tests in `test/`
-and `submit/`, and `event-graph-indexer`'s graph/sync tests, need a live Daml
-sandbox / Neo4j (and DARs built with `dpm`), so they are not run in CI. Run them
-manually via the `justfile` (e.g. `just test-nested`, `just sandbox-init-*`).
+and `submit/` need a live Daml sandbox (and DARs built with `dpm`), so they are
+not run in CI. `event-graph-indexer/tests/surreal_integration.rs` starts its own
+throwaway in-memory server with the `surreal` program and skips itself when that
+isn't installed: run it with `cargo test -p event-graph-indexer`. Run the
+sandbox ones manually via the `justfile` (e.g. `just test-nested`, `just sandbox-init-*`).
 See `justfile` for all recipes.
 
 ## Landing changes (branch protection on `main`)
@@ -84,5 +84,4 @@ the `/rust-ci` skill before pushing to avoid a red CI.
   are gitignored.
 - Local-only files (gitignored): `CLAUDE.local.md`, `.claude/` (except the
   shared `.claude/settings.json` and `.claude/skills/`),
-  `event-graph-indexer/config/config.toml`, `event-graph-ui/config.toml`,
-  `secrets.env.1password`, `.env`.
+  `event-graph-indexer/config/config.toml`, `secrets.env.1password`, `.env`.

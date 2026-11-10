@@ -42,7 +42,7 @@ jobs:
         run: cargo build --workspace --all-targets --locked
 
       # Compile every test target but do not run them: the integration tests
-      # need a live DAML sandbox / Neo4j that isn't available in CI.
+      # need a live DAML sandbox / SurrealDB server that isn't available in CI.
       - name: Compile tests
         run: cargo test --workspace --no-run --locked
 

@@ -2,15 +2,12 @@
 **/target
 **/.daml
 **/log
-event-graph/neo4j/
 .venv
 event-graph-indexer/config/config.toml
-event-graph-ui/config.toml
 # Local secret wiring; commit only the .example template.
 secrets.env.1password
 .env
 sync.log
-event-graph-ui/ui.log
 test/*.log
 plans
 # Ignore .claude/ by default, but share team-useful, non-personal bits.
@@ -20,7 +17,6 @@ plans
 CLAUDE.local.md
 .tokensave/
 .superpowers/
-analytics-queries.local.toml
 docs/
 .codegraph/
 sandbox.log

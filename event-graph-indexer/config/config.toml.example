@@ -10,27 +10,25 @@ active_profile = "local"
 [logging]
 level = "info"
 
-[neo4j]
-uri = "neo4j://127.0.0.1:7687"
-user = "neo4j"
-password = "${NEO4J_PASSWORD}"
-# Number of updates to batch before committing to Neo4j (default: 500)
-batch_size = 500
+[surrealdb]
+# Connection to a running SurrealDB 4 server. Each setting can be overridden
+# by an environment variable: SURREAL_URL, SURREAL_NAMESPACE, SURREAL_DATABASE,
+# SURREAL_USERNAME, SURREAL_PASSWORD. Leave the password out of this file and
+# provide SURREAL_PASSWORD (1Password, .env or export).
+url = "ws://127.0.0.1:8000"
+namespace = "canton"
+database = "event_graph"
+# A database user, never root. An administrator creates it once:
+#   DEFINE USER streamer ON DATABASE PASSWORD '...' ROLES EDITOR;
+username = "streamer"
+# password = "${SURREAL_PASSWORD}"
+# Number of ledger updates written per database transaction (default: 100)
+batch_size = 100
 # Flush timeout in seconds - commit even if batch isn't full (default: 1)
 flush_timeout_secs = 1
 # Idle timeout in seconds - reconnect if no updates received for this duration (default: 60)
 # Canton sends periodic OffsetCheckpoints, so a live stream is never silent for long
 idle_timeout_secs = 60
-
-[storage]
-# Flatten create/choice arguments into dot-separated Neo4j node properties (default: true)
-# When enabled, nested record fields become directly queryable:
-#   MATCH (c:Created) WHERE c.`create_arg.person.homeAddress.city` = 'Zurich' RETURN c
-flatten_arguments = true
-# Maximum recursion depth for flattening nested records (default: 10)
-flatten_max_depth = 10
-# Store raw JSON blobs of arguments as create_arguments_json / choice_argument_json (default: false)
-store_arguments_json = false
 
 # ============================================================================
 # LOCAL PROFILE - For local development with Canton sandbox
@@ -43,7 +41,7 @@ fake_jwt_user = "alice"
 # parties = ["Alice::1220..."]
 # Ledger API URL
 url = "http://localhost:6865"
-# Starting offset for sync when Neo4j has no data (optional)
+# Starting offset for sync when the database has no data (optional)
 # Positive value: absolute offset. Negative value: relative to ledger end (e.g., -5000000)
 # If not specified, falls back to ledger pruning offset
 # starting_offset = -5000000

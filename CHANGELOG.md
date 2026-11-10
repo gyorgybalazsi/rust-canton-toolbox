@@ -15,6 +15,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ACS readers (`active_contracts`, `get_blob`) set
   `include_incomplete_reassignments = true` so incomplete (un)assigned entries
   are still returned, as before 3.7
+- `event-graph-indexer` writes to a SurrealDB 4 server instead of Neo4j.
+  Neo4j labels became tables (`transaction`, `created`, `exercised`, `party`,
+  `sync_state`) and relationship types became relation tables (`action`,
+  `consequence`, `target`, `consumes`, `requested`). Contract and choice
+  arguments are stored as nested objects instead of flattened properties or
+  JSON strings; party lists and result contract ids are arrays; timestamps are
+  datetimes. See `event-graph-indexer/README.md`.
+- Config: the `[neo4j]` section is replaced by `[surrealdb]`
+  (`url`, `namespace`, `database`, `username`, `password`), each overridable
+  with a `SURREAL_*` environment variable. The indexer signs in as a database
+  user, never as root.
+- Database writes retry with a growing delay (1 s up to 30 s) while the server
+  is down, keeping the batch in memory instead of failing.
+- `print-cypher` is now `print-surql`.
+
+### Removed
+- `event-graph-ui` (the Dioxus graph visualization).
+- The `[storage]` config section (`flatten_arguments`, `flatten_max_depth`,
+  `store_arguments_json`): arguments are always stored nested.
+- The `neo4rs` dependency.
 
 ## [0.1.0] - 2026-07-01
 

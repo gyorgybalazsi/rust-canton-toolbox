@@ -18,7 +18,7 @@ indexer-run:
     {{secrets_runner}} \
       cargo run --release -p event-graph-indexer -- sync --use-keycloak 2>&1 | tee sync.log
 
-# Fresh start: clear Neo4j, load current ACS, and stream from ledger end
+# Fresh start: delete the indexer data in SurrealDB, load current ACS, and stream from ledger end
 indexer-fresh:
     {{secrets_runner}} \
       cargo run --release -p event-graph-indexer -- sync --use-keycloak --fresh 2>&1 | tee sync.log
