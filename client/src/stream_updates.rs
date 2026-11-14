@@ -85,6 +85,7 @@ pub async fn stream_updates(
         include_transactions: Some(transaction_format),
         include_reassignments: None,
         include_topology_events: None,
+        include_transactions_and_reassignments: None,
     };
 
     let request = GetUpdatesRequest {

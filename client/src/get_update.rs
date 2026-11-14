@@ -45,6 +45,7 @@ pub async fn get_update_by_id(
         include_transactions: Some(transaction_format),
         include_reassignments: None,
         include_topology_events: None,
+        include_transactions_and_reassignments: None,
     };
 
     let request = GetUpdateByIdRequest {

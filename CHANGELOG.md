@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Daml examples in `_daml/` and codegen's Daml-LF protos moved to SDK 3.7.1
+  (`daml-nested-test` was on 3.4.11, the rest on 3.4.8)
+- Vendored Ledger API v2 protos bumped from Canton 3.6.1 to 3.7.1 (adds
+  `size_config_options.proto`, `account_id` traffic fields, and
+  `include_transactions_and_reassignments` / `include_incomplete_reassignments`)
+- ACS readers (`active_contracts`, `get_blob`) set
+  `include_incomplete_reassignments = true` so incomplete (un)assigned entries
+  are still returned, as before 3.7
+
 ## [0.1.0] - 2026-07-01
 
 ### Added

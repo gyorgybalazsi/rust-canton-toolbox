@@ -251,6 +251,13 @@ pub struct PrepareSubmissionRequest {
     /// Optional
     #[prost(uint32, optional, tag = "18")]
     pub taps_max_passes: ::core::option::Option<u32>,
+    /// The account used for the estimated cost check during preparation.
+    /// Not stored in the prepared transaction, so execution can use a different account.
+    /// Uses the same format, fallback, and required rights as ``Commands.account_id``.
+    ///
+    /// Optional
+    #[prost(string, tag = "19")]
+    pub account_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PrepareSubmissionResponse {
@@ -353,6 +360,14 @@ pub struct ExecuteSubmissionRequest {
     /// Optional
     #[prost(message, optional, tag = "8")]
     pub min_ledger_time: ::core::option::Option<MinLedgerTime>,
+    /// The account to charge for execution. It can be different from the one checked during preparation.
+    /// Party signatures don't cover this field.
+    /// Uses the same format, fallback, and required rights as ``Commands.account_id``.
+    /// The fallback uses the acting parties from the prepared transaction.
+    ///
+    /// Optional
+    #[prost(string, tag = "9")]
+    pub account_id: ::prost::alloc::string::String,
     /// Specifies the deduplication period for the change ID (See PrepareSubmissionRequest).
     /// If omitted, the participant will assume the configured maximum deduplication time.
     ///
@@ -426,6 +441,14 @@ pub struct ExecuteSubmissionAndWaitRequest {
     /// Optional
     #[prost(message, optional, tag = "8")]
     pub min_ledger_time: ::core::option::Option<MinLedgerTime>,
+    /// The account to charge for execution. It can be different from the one checked during preparation.
+    /// Party signatures don't cover this field.
+    /// Uses the same format, fallback, and required rights as ``Commands.account_id``.
+    /// The fallback uses the acting parties from the prepared transaction.
+    ///
+    /// Optional
+    #[prost(string, tag = "9")]
+    pub account_id: ::prost::alloc::string::String,
     /// Specifies the deduplication period for the change ID (See PrepareSubmissionRequest).
     /// If omitted, the participant will assume the configured maximum deduplication time.
     ///
@@ -523,6 +546,14 @@ pub struct ExecuteSubmissionAndWaitForTransactionRequest {
     /// Optional
     #[prost(message, optional, tag = "9")]
     pub transaction_format: ::core::option::Option<super::TransactionFormat>,
+    /// The account to charge for execution. It can be different from the one checked during preparation.
+    /// Party signatures don't cover this field.
+    /// Uses the same format, fallback, and required rights as ``Commands.account_id``.
+    /// The fallback uses the acting parties from the prepared transaction.
+    ///
+    /// Optional
+    #[prost(string, tag = "10")]
+    pub account_id: ::prost::alloc::string::String,
     /// Specifies the deduplication period for the change ID (See PrepareSubmissionRequest).
     /// If omitted, the participant will assume the configured maximum deduplication time.
     ///
