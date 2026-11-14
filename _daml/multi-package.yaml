@@ -1,5 +1,16 @@
+# Lets `dpm build --all` in _daml/ build every example package at once.
 packages:
-  - ./daml-asset
-  - ./daml-optional
-  - ./daml-ticketoffer
-  - ./full
+  - ./daml-asset/main
+  - ./daml-asset/test
+  - ./daml-interface-example/interfaces
+  - ./daml-interface-example/main
+  - ./daml-interface-example/test
+  - ./daml-nested-test/main
+  - ./daml-optional/main
+  - ./daml-optional/test
+  - ./daml-ticketoffer/main
+  - ./daml-ticketoffer/test
+  - ./daml-ticketoffer-explicit-disclosure/main
+  - ./daml-ticketoffer-explicit-disclosure/test
+  - ./full/main
+  - ./full/test

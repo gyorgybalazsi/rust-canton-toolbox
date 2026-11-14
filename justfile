@@ -44,6 +44,15 @@ get-update update_id profile="mainnet":
 
 # --- Integration tests ---
 
+# Build every example DAR in _daml/ (the sandbox tests need them)
+build-dars:
+    cd _daml && dpm build --all
+
+# Run the sandbox integration tests (test, client, submit). They share the
+# sandbox ports 6865-6869, so they run one at a time.
+test-sandbox: build-dars
+    cargo test -p daml-model-rep-examples -p client -p submit -- --test-threads=1
+
 # Run the nested-test integration test (starts sandbox, creates contract, exercises choice)
 test-nested:
     cd _daml/daml-nested-test && dpm build --all

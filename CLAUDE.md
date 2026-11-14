@@ -58,7 +58,7 @@ and `submit/` need a live Daml sandbox (and DARs built with `dpm`), so they are
 not run in CI. `syncer/tests/surreal_integration.rs` starts its own
 throwaway in-memory server with the `surreal` program and skips itself when that
 isn't installed: run it with `cargo test -p syncer`. Run the
-sandbox ones manually via the `justfile` (e.g. `just test-nested`, `just sandbox-init-*`).
+sandbox ones manually with `just test-sandbox` (builds the DARs, runs them with `--test-threads=1`; no other sandbox may be running). See also `just test-nested` and `just sandbox-init-*`.
 See `justfile` for all recipes.
 
 ## Landing changes (branch protection on `main`)

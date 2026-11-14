@@ -119,7 +119,9 @@ just sync-sandbox              # sync against local sandbox (fake JWT)
 just sync-sandbox-fresh        # fresh start against local sandbox
 just sync-stop                 # stop the syncer
 just get-update <update-id>    # look up one update by its ID
-just test-nested               # run nested-test integration test
+just build-dars                # build every example DAR in _daml/
+just test-sandbox              # build the DARs, run the sandbox integration tests
+just test-nested               # run only the nested-test integration test
 just sandbox-init-ticketoffer  # init sandbox with ticketoffer example
 ```
 
@@ -170,11 +172,29 @@ with that tool when the Daml examples change.
 
 ## Daml Examples
 
-Test Daml models live in the `_daml/` folder. Each contains a Daml script that allocates parties when started with `daml start`.
+Example Daml models live in `_daml/`. Each is a multi-package project (`main`,
+usually `test`, sometimes `interfaces`); build one with `dpm build --all` in its
+folder, or all of them with `just build-dars`.
 
-To retrieve party IDs after starting Sandbox:
-1. Start the Canton console: `daml canton-console`
-2. List parties: `sandbox.parties.list().map(_.party.toProtoPrimitive)`
+`just sandbox-init-<example>` (for example `just sandbox-init-ticketoffer`)
+builds an example, starts a sandbox with its DAR, and runs its setup script,
+which allocates the parties. To get the party IDs afterwards, open the Canton
+console with `dpm canton-console` and run
+`sandbox.parties.list().map(_.party.toProtoPrimitive)`.
+
+## Tests
+
+CI only compiles the tests. To run them locally:
+
+- `cargo test -p syncer` runs the syncer's unit tests, plus its SurrealDB
+  integration test when the `surreal` program is on your PATH (it starts its
+  own in-memory server and skips itself otherwise).
+- `just test-sandbox` runs the integration tests in `test`, `client` and
+  `submit`. They start their own Daml sandbox, so they need the example DARs
+  (built by the recipe) and free sandbox ports: stop any sandbox you have
+  running first, or every test fails with "Failed to bind to address". The
+  tests share fixed ports, which is why the recipe runs them with
+  `--test-threads=1`.
 
 ## License
 
