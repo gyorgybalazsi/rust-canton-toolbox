@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Top-level config file structure. Only deserializes the fields the client needs;
-/// unknown keys (logging, neo4j, storage, etc.) are silently ignored by serde.
+/// unknown keys (logging, surrealdb, etc.) are silently ignored by serde.
 #[derive(Debug, Deserialize)]
 pub struct ConfigFile {
     pub active_profile: String,

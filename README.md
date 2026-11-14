@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Rust workspace for interacting with Canton/Daml ledgers: streaming events, generating Rust types from Daml models, syncing ledger state into Neo4j, and visualizing the event graph.
+A Rust workspace for interacting with Canton/Daml ledgers: streaming events, generating Rust types from Daml models, and syncing the ledger event graph into SurrealDB.
 
 Why Rust? Because it's not an officially supported client language, and building from scratch is the best way to understand the Ledger API and `.dalf` encoding.
 
@@ -10,7 +10,7 @@ Why Rust? Because it's not an officially supported client language, and building
 
 - **Daml SDK** `3.7.1+` (`dpm install 3.7.1`)
 - **[protoc](https://protobuf.dev/installation/)** (Protocol Buffer Compiler)
-- **Docker Desktop** or **Neo4j Desktop** (for event-graph-indexer and event-graph-ui)
+- **[SurrealDB](https://surrealdb.com/install)** `4.x` server (for event-graph-indexer; the `surreal` program also runs its integration tests)
 - **[just](https://github.com/casey/just)** command runner (optional, for convenience recipes)
 
 Add protoc to rust-analyzer in `.vscode/settings.json`:
@@ -26,20 +26,21 @@ Add protoc to rust-analyzer in `.vscode/settings.json`:
 ## Secrets
 
 Config files never hold secret values. Secret fields use `${VAR}` placeholders
-(e.g. `password = "${NEO4J_PASSWORD}"`), and the loader fills them in from
+(e.g. `client_secret = "${MAINNET_CLIENT_SECRET}"`), and the loader fills them in from
 environment variables when it reads the config. Any way of setting those
 variables works; 1Password is the default the `justfile` assumes.
 
 The variable names are up to you: they only have to match between your
 `config.toml` and wherever the values come from. The committed
 [`secrets.env.1password.example`](secrets.env.1password.example) lists the
-names used by the example configs (`NEO4J_PASSWORD`, `DEVNET_CLIENT_SECRET`,
+names used by the example configs (`SURREAL_PASSWORD`, `DEVNET_CLIENT_SECRET`,
 `MAINNET_CLIENT_SECRET`, ...).
 
-First, create your local config files (both are gitignored):
-
-- `event-graph-indexer/config/config.toml`, starting from `event-graph-indexer/config/config.toml.example`
-- `event-graph-ui/config.toml`, whose `[neo4j]` block uses the same `${NEO4J_PASSWORD}` placeholder
+First, create your local config file (gitignored):
+`event-graph-indexer/config/config.toml`, starting from
+`event-graph-indexer/config/config.toml.example`. The SurrealDB connection
+settings can also come straight from `SURREAL_*` environment variables (see the
+[indexer README](event-graph-indexer/README.md#configuration)).
 
 Then choose where the values come from.
 
@@ -54,7 +55,7 @@ Then choose where the values come from.
    ```
 
    ```bash
-   NEO4J_PASSWORD="op://<vault>/<item>/<field>"
+   SURREAL_PASSWORD="op://<vault>/<item>/<field>"
    ```
 
 4. Check one reference with `op read 'op://<vault>/<item>/<field>'`.
@@ -70,7 +71,7 @@ not to wrap commands in `op run`:
 
 ```bash
 SECRETS_RUNNER=
-NEO4J_PASSWORD=...
+SURREAL_PASSWORD=...
 MAINNET_CLIENT_SECRET=...
 ```
 
@@ -92,8 +93,7 @@ and then runs the rest of the command, e.g.
 | **codegen** | bin | Generates Rust structs from DAR packages, mirroring Daml template payloads and choice records |
 | **daml-type-rep** | lib | Type representations for Daml values (built-in types, numeric scaling, template IDs) |
 | **derive-lapi-access** | proc-macro | Derive macro implementing the `LapiAccess` trait for gRPC type conversions |
-| **event-graph-indexer** | bin | Streams Canton events into Neo4j with resilient sync, batching, and configurable argument flattening |
-| **event-graph-ui** | bin | Dioxus fullstack web UI for visualizing the Neo4j event graph |
+| **event-graph-indexer** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
 | **submit** | lib | Library for submitting Daml contracts and exercising choices via gRPC |
 | **sandbox-init** | bin | CLI tool to start a Daml sandbox and run initialization scripts from DAR files |
 | **test** | lib | Integration tests for the `LapiAccess` trait paired with Daml examples |
@@ -116,15 +116,16 @@ Run `cargo run -p client -- <subcommand> --help` for parameter details.
 
 ### event-graph-indexer
 
-Streams the Canton event graph into Neo4j with:
-- Resilient sync with automatic reconnection and exponential backoff
+Streams the Canton event graph into a SurrealDB server with:
+- Resilient sync with automatic reconnection and backoff, for both the ledger and the database
 - Keycloak OAuth2 authentication (client credentials or password grant)
-- Configurable argument flattening into dot-separated Neo4j properties
+- Contract and choice arguments stored as nested objects, queryable by path
 - ACS (Active Contract Set) bootstrapping
 - Configurable batching, flush timeouts, and idle detection
 - Multi-profile config support (local, devnet, mainnet)
 
 Configuration goes in `event-graph-indexer/config/config.toml` (gitignored).
+See the [indexer README](event-graph-indexer/README.md) for the data model.
 
 See also: [A Daml ledger tells a story](https://discuss.daml.com/t/blog-post-a-daml-ledger-tells-a-story-it-s-time-to-show-it-to-everyone/6734).
 
@@ -145,7 +146,7 @@ Common tasks are available as `just` recipes:
 ```
 just                              # list all recipes
 just indexer-run                  # sync with Keycloak auth (release mode)
-just indexer-fresh                # fresh start: clear Neo4j + reload ACS
+just indexer-fresh                # fresh start: clear indexer data + reload ACS
 just indexer-sandbox              # sync against local sandbox (fake JWT)
 just indexer-sandbox-fresh        # fresh start against local sandbox
 just indexer-stop                 # stop the indexer process

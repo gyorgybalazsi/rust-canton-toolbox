@@ -35,15 +35,15 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 - **clippy fails** -> fix the lint at the source. Use `cargo clippy --fix` for
   machine-applicable suggestions; for generated code (`ledger-api/src/pb/*`) or
   intentional patterns, prefer a scoped `#[allow(...)]` with a comment over
-  editing — see existing examples in `ledger-api/src/lib.rs`, `test/src/lib.rs`,
-  and `event-graph-ui/src/main.rs`.
+  editing — see existing examples in `ledger-api/src/lib.rs` and `test/src/lib.rs`.
 - **build/test fails** -> a real compile error; fix it.
 
 ## What this does NOT do
 `cargo test --no-run` **compiles** every test target but runs nothing. The
-integration tests (in `test/` and `submit/`, plus `event-graph-indexer`'s graph/sync
-tests) need a live DAML sandbox / Neo4j that isn't available in CI — run those
-manually via the `justfile` recipes (e.g. `just test-nested`) when needed.
+integration tests in `test/` and `submit/` need a live DAML sandbox that isn't
+available in CI — run those manually via the `justfile` recipes (e.g.
+`just test-nested`) when needed. `event-graph-indexer`'s SurrealDB tests start
+their own throwaway `surreal` server: `cargo test -p event-graph-indexer`.
 
 ## Done when
 All four commands exit 0 — the same condition the required CI check enforces, so

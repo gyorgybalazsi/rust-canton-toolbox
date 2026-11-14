@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use client::jwt::TokenSource;
 use client::stream_updates::stream_updates;
 use event_graph_indexer::config;
-use event_graph_indexer::cypher;
+use event_graph_indexer::model;
 use event_graph_indexer::sync::{BackoffConfig, SyncConfig, run_resilient_sync};
 use ledger_api::v2::Identifier;
 use std::time::Instant;
@@ -19,8 +19,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Print Cypher code generated from the event node stream
-    PrintCypher {
+    /// Print the SurrealQL writes generated from the update stream (no database needed)
+    PrintSurql {
         #[arg(long)]
         access_token: String,
         #[arg(long)]
@@ -41,7 +41,7 @@ enum Commands {
         #[arg(long)]
         template_entity: Vec<String>,
     },
-    /// Benchmark raw Canton stream throughput (no Neo4j writes)
+    /// Benchmark raw Canton stream throughput (no database writes)
     Benchmark {
         /// Path to config.toml file
         #[arg(long)]
@@ -72,7 +72,7 @@ enum Commands {
         /// Use Keycloak to obtain a real JWT token (requires keycloak section in profile)
         #[arg(long)]
         use_keycloak: bool,
-        /// Fresh start: clear Neo4j database, load current ACS, and stream from ledger end
+        /// Fresh start: delete the indexer data in SurrealDB, load current ACS, and stream from ledger end
         #[arg(long)]
         fresh: bool,
         /// Start a fresh sync from the offset that was current N days ago
@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     match cli.command {
-        Commands::PrintCypher {
+        Commands::PrintSurql {
             access_token,
             url,
             begin_exclusive,
@@ -149,13 +149,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
             while let Some(response) = update_stream.next().await {
-                let cypher_queries = cypher::get_updates_response_to_cypher(
-                    &response?,
-                    cypher::FlattenConfig::default(),
-                );
-                println!("Start transaction");
-                println!("{:?}", cypher_queries);
-                println!("End transaction");
+                let batch = model::update_to_batch(&response?);
+                if batch.is_empty() {
+                    continue;
+                }
+                println!("-- offset {:?}", batch.max_offset);
+                print!("{}", batch.to_surql_preview());
             }
         }
         Commands::Benchmark {
@@ -165,18 +164,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             count,
             begin_offset,
         } => {
-            info!("Starting Canton stream benchmark (no Neo4j writes)");
+            info!("Starting Canton stream benchmark (no database writes)");
 
             let config = match config_file {
                 Some(path) => event_graph_indexer::config::read_config(&path, profile.as_deref())
                     .expect("failed to read config"),
                 None => event_graph_indexer::config::read_config_from_toml(profile.as_deref())
                     .expect("failed to read config"),
-            };
-            let flatten_config = cypher::FlattenConfig {
-                enabled: config.storage.flatten_arguments,
-                max_depth: config.storage.flatten_max_depth,
-                store_arguments_json: config.storage.store_arguments_json,
             };
             let parties = config.ledger.parties.unwrap_or_default();
             let ledger_url = config.ledger.url;
@@ -239,7 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 start_offset, count, parties
             );
             info!(
-                "Streaming {} updates from Canton (stream only, no cypher, no neo4j)...",
+                "Streaming {} updates from Canton (stream only, no conversion, no database)...",
                 count
             );
 
@@ -296,9 +290,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("  Rate: {:.1} updates/s", raw_rate);
             info!("  Offset range: {} -> {}", start_offset, last_offset);
 
-            // Benchmark 2: Stream + Cypher generation
+            // Benchmark 2: Stream + conversion to SurrealDB rows
             info!(
-                "\nStreaming {} updates with Cypher generation (no neo4j)...",
+                "\nStreaming {} updates with conversion to SurrealDB rows (no database)...",
                 count
             );
             let mut update_stream = stream_updates(
@@ -311,24 +305,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
             let start_time = Instant::now();
-            let mut cypher_count = 0u64;
-            let mut total_queries = 0usize;
+            let mut convert_count = 0u64;
+            let mut total_rows = 0usize;
 
             while let Some(response) = update_stream.next().await {
                 match response {
                     Ok(resp) => {
-                        let queries = cypher::get_updates_response_to_cypher(&resp, flatten_config);
-                        total_queries += queries.len();
-                        cypher_count += 1;
-                        if cypher_count >= count {
+                        total_rows += model::update_to_batch(&resp).row_count();
+                        convert_count += 1;
+                        if convert_count >= count {
                             break;
                         }
-                        if cypher_count.is_multiple_of(1000) {
+                        if convert_count.is_multiple_of(1000) {
                             let elapsed = start_time.elapsed().as_secs_f64();
                             info!(
-                                "[Stream+Cypher] {} updates, {:.1} updates/s",
-                                cypher_count,
-                                cypher_count as f64 / elapsed
+                                "[Stream+Convert] {} updates, {:.1} updates/s",
+                                convert_count,
+                                convert_count as f64 / elapsed
                             );
                         }
                     }
@@ -338,23 +331,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            let cypher_elapsed = start_time.elapsed();
-            let cypher_rate = cypher_count as f64 / cypher_elapsed.as_secs_f64();
-            info!("=== STREAM + CYPHER BENCHMARK ===");
-            info!("  Updates: {}", cypher_count);
-            info!("  Cypher queries generated: {}", total_queries);
-            info!("  Time: {:.2}s", cypher_elapsed.as_secs_f64());
-            info!("  Rate: {:.1} updates/s", cypher_rate);
+            let convert_elapsed = start_time.elapsed();
+            let convert_rate = convert_count as f64 / convert_elapsed.as_secs_f64();
+            info!("=== STREAM + CONVERT BENCHMARK ===");
+            info!("  Updates: {}", convert_count);
+            info!("  Rows generated: {}", total_rows);
+            info!("  Time: {:.2}s", convert_elapsed.as_secs_f64());
+            info!("  Rate: {:.1} updates/s", convert_rate);
 
             // Summary
             info!("\n=== SUMMARY ===");
             info!("  Raw stream:      {:.1} updates/s", raw_rate);
-            info!("  Stream + Cypher: {:.1} updates/s", cypher_rate);
+            info!("  Stream + Convert: {:.1} updates/s", convert_rate);
             info!(
-                "  Cypher overhead: {:.1}%",
-                (1.0 - cypher_rate / raw_rate) * 100.0
+                "  Conversion overhead: {:.1}%",
+                (1.0 - convert_rate / raw_rate) * 100.0
             );
-            info!("  (Compare with event-graph-indexer sync rate to see Neo4j write overhead)");
+            info!("  (Compare with event-graph-indexer sync rate to see database write overhead)");
         }
         Commands::Sync {
             config_file,
@@ -383,14 +376,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let ledger_url = config.ledger.url;
             let template_filters = config.ledger.template_filters;
             let starting_offset = config.ledger.starting_offset;
-            let neo4j_uri = config.neo4j.uri.clone();
-            let neo4j_user = config.neo4j.user.clone();
-            let neo4j_pass = config.neo4j.password.clone();
+            let db = config
+                .surrealdb
+                .resolve()
+                .expect("incomplete SurrealDB settings");
             let keycloak_config = config.keycloak;
 
             info!(
                 ledger_url = %ledger_url,
-                neo4j_uri = %neo4j_uri,
+                surreal_url = %db.url,
+                surreal_namespace = %db.namespace,
+                surreal_database = %db.database,
                 parties = ?configured_parties,
                 template_filters = ?template_filters,
                 starting_offset = ?starting_offset,
@@ -462,26 +458,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let sync_config = SyncConfig {
                 ledger_url,
                 parties,
-                neo4j_uri,
-                neo4j_user,
-                neo4j_pass,
+                db,
                 template_filters,
                 starting_offset,
-                batch_size: config.neo4j.batch_size,
-                flush_timeout_secs: config.neo4j.flush_timeout_secs,
-                idle_timeout_secs: config.neo4j.idle_timeout_secs,
-                flatten_arguments: config.storage.flatten_arguments,
-                flatten_max_depth: config.storage.flatten_max_depth,
-                store_arguments_json: config.storage.store_arguments_json,
+                batch_size: config.surrealdb.batch_size,
+                flush_timeout_secs: config.surrealdb.flush_timeout_secs,
+                idle_timeout_secs: config.surrealdb.idle_timeout_secs,
             };
 
             if fresh {
                 info!(
-                    "FRESH START: Will clear Neo4j, load current ACS, and stream from ledger end"
+                    "FRESH START: Will clear SurrealDB data, load current ACS, and stream from ledger end"
                 );
             } else {
                 info!(
-                    "Starting resilient sync loop (will auto-reconnect on failures, resume from Neo4j checkpoint)"
+                    "Starting resilient sync loop (will auto-reconnect on failures, resume from SurrealDB checkpoint)"
                 );
             }
             run_resilient_sync(

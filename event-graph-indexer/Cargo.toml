@@ -16,7 +16,8 @@ prost-wkt = { workspace = true }
 prost-wkt-types = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
-neo4rs = { workspace = true }
+surrealdb = { workspace = true }
+rust_decimal = { workspace = true }
 serde_json.workspace = true
 anyhow = { workspace = true }
 toml = { workspace = true }

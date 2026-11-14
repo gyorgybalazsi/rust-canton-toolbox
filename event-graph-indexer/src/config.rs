@@ -10,53 +10,21 @@ use std::sync::OnceLock;
 #[derive(Debug, Deserialize)]
 pub struct ConfigFile {
     pub logging: LoggingConfig,
-    pub neo4j: Neo4jConfig,
+    /// SurrealDB connection and batching settings. Every connection field can
+    /// also come from a `SURREAL_*` environment variable, which wins.
+    #[serde(default)]
+    pub surrealdb: SurrealConfig,
     /// The active profile name (can be overridden via CLI)
     pub active_profile: String,
     /// Named profiles containing ledger and keycloak settings
     pub profiles: HashMap<String, ProfileConfig>,
-    /// Storage behavior settings
-    #[serde(default)]
-    pub storage: StorageConfig,
-}
-
-/// Controls how event data is stored in Neo4j
-#[derive(Debug, Deserialize, Clone)]
-pub struct StorageConfig {
-    /// Flatten create/choice arguments into dot-separated Neo4j node properties
-    #[serde(default = "default_true")]
-    pub flatten_arguments: bool,
-    /// Maximum recursion depth for flattening nested records
-    #[serde(default = "default_flatten_max_depth")]
-    pub flatten_max_depth: usize,
-    /// Store raw JSON blob of arguments as create_arguments_json / choice_argument_json properties
-    #[serde(default)]
-    pub store_arguments_json: bool,
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            flatten_arguments: true,
-            flatten_max_depth: 10,
-            store_arguments_json: false,
-        }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_flatten_max_depth() -> usize {
-    10
 }
 
 fn placeholder_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // Matches `${VAR}` where VAR uses [A-Za-z0-9_]. Letters of either case
     // are accepted so contributors can pick natural names; convention in
-    // this repo is uppercase (NEO4J_PASSWORD, MAINNET_CLIENT_SECRET, etc.).
+    // this repo is uppercase (SURREAL_PASSWORD, MAINNET_CLIENT_SECRET, etc.).
     RE.get_or_init(|| Regex::new(r"\$\{([A-Za-z0-9_]+)\}").unwrap())
 }
 
@@ -89,10 +57,12 @@ fn substitute_env(s: &str, field: &str) -> anyhow::Result<String> {
 }
 
 /// Resolve `${VAR}` placeholders inside the secret-bearing fields of the
-/// active profile and the top-level `[neo4j]` section. Fields outside this
+/// active profile and the top-level `[surrealdb]` section. Fields outside this
 /// set (e.g. ledger URL, token endpoint) are left untouched.
 fn resolve_secrets(cfg: &mut Config) -> anyhow::Result<()> {
-    cfg.neo4j.password = substitute_env(&cfg.neo4j.password, "neo4j.password")?;
+    if let Some(pw) = cfg.surrealdb.password.as_mut() {
+        *pw = substitute_env(pw, "surrealdb.password")?;
+    }
     if let Some(kc) = cfg.keycloak.as_mut() {
         match &mut kc.auth_method {
             KeycloakAuthMethod::ClientCredentials { client_secret } => {
@@ -125,10 +95,9 @@ pub struct ProfileConfig {
 #[derive(Debug)]
 pub struct Config {
     pub logging: LoggingConfig,
-    pub neo4j: Neo4jConfig,
+    pub surrealdb: SurrealConfig,
     pub ledger: LedgerConfig,
     pub keycloak: Option<KeycloakConfig>,
-    pub storage: StorageConfig,
 }
 
 /// Authentication method for Keycloak
@@ -165,12 +134,23 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct Neo4jConfig {
-    pub uri: String,
-    pub user: String,
-    pub password: String,
-    /// Number of updates to batch before committing to Neo4j
+/// `[surrealdb]` section of the config file.
+///
+/// The connection fields are optional here because each one can instead come
+/// from an environment variable (see [`SurrealConfig::resolve`]).
+#[derive(Deserialize, Clone, Default)]
+pub struct SurrealConfig {
+    /// Server URL, e.g. `ws://127.0.0.1:8000`. Env: `SURREAL_URL`.
+    pub url: Option<String>,
+    /// Env: `SURREAL_NAMESPACE`.
+    pub namespace: Option<String>,
+    /// Env: `SURREAL_DATABASE`.
+    pub database: Option<String>,
+    /// A database-level user (never root). Env: `SURREAL_USERNAME`.
+    pub username: Option<String>,
+    /// Env: `SURREAL_PASSWORD`. May be a `${VAR}` placeholder.
+    pub password: Option<String>,
+    /// Number of ledger updates written per database transaction
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
     /// Flush timeout in seconds - commit even if batch isn't full after this duration
@@ -181,6 +161,70 @@ pub struct Neo4jConfig {
     /// so a live stream is never silent for long.
     #[serde(default = "default_idle_timeout")]
     pub idle_timeout_secs: u64,
+}
+
+impl std::fmt::Debug for SurrealConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SurrealConfig")
+            .field("url", &self.url)
+            .field("namespace", &self.namespace)
+            .field("database", &self.database)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("batch_size", &self.batch_size)
+            .field("flush_timeout_secs", &self.flush_timeout_secs)
+            .field("idle_timeout_secs", &self.idle_timeout_secs)
+            .finish()
+    }
+}
+
+impl SurrealConfig {
+    /// Builds the connection settings: each `SURREAL_*` environment variable
+    /// overrides the matching config value. Fails if a setting has neither.
+    pub fn resolve(&self) -> Result<DbConfig> {
+        self.resolve_with(|name| std::env::var(name).ok())
+    }
+
+    fn resolve_with(&self, env: impl Fn(&str) -> Option<String>) -> Result<DbConfig> {
+        let pick = |var: &str, value: &Option<String>, field: &str| -> Result<String> {
+            env(var)
+                .filter(|v| !v.is_empty())
+                .or_else(|| value.clone())
+                .with_context(|| {
+                    format!("SurrealDB setting '{field}' is missing: set surrealdb.{field} in the config file or the {var} environment variable")
+                })
+        };
+        Ok(DbConfig {
+            url: pick("SURREAL_URL", &self.url, "url")?,
+            namespace: pick("SURREAL_NAMESPACE", &self.namespace, "namespace")?,
+            database: pick("SURREAL_DATABASE", &self.database, "database")?,
+            username: pick("SURREAL_USERNAME", &self.username, "username")?,
+            password: pick("SURREAL_PASSWORD", &self.password, "password")?,
+        })
+    }
+}
+
+/// Resolved SurrealDB connection settings.
+#[derive(Clone)]
+pub struct DbConfig {
+    pub url: String,
+    pub namespace: String,
+    pub database: String,
+    pub username: String,
+    pub password: String,
+}
+
+/// Never prints the password.
+impl std::fmt::Debug for DbConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DbConfig")
+            .field("url", &self.url)
+            .field("namespace", &self.namespace)
+            .field("database", &self.database)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Template filter configuration with explicit field names.
@@ -196,7 +240,7 @@ pub struct TemplateFilterConfig {
 }
 
 fn default_batch_size() -> usize {
-    500
+    100
 }
 
 fn default_flush_timeout() -> u64 {
@@ -214,7 +258,7 @@ pub struct LedgerConfig {
     pub url: String,
     /// Optional list of contract templates to filter on.
     pub template_filters: Option<Vec<TemplateFilterConfig>>,
-    /// Starting offset for sync when Neo4j has no data.
+    /// Starting offset for sync when the database has no data.
     /// Positive value: absolute offset. Negative value: relative to ledger end (e.g., -5000000).
     /// If not specified, falls back to ledger pruning offset.
     pub starting_offset: Option<i64>,
@@ -248,10 +292,9 @@ pub fn resolve_config(config_file: ConfigFile, profile_override: Option<&str>) -
 
     let mut cfg = Config {
         logging: config_file.logging,
-        neo4j: config_file.neo4j,
+        surrealdb: config_file.surrealdb,
         ledger: profile.ledger.clone(),
         keycloak: profile.keycloak.clone(),
-        storage: config_file.storage,
     };
     resolve_secrets(&mut cfg)?;
     Ok(cfg)
@@ -346,18 +389,15 @@ mod tests {
         }
     }
 
-    fn make_test_config(keycloak: Option<KeycloakConfig>, neo4j_password: &str) -> Config {
+    fn make_test_config(keycloak: Option<KeycloakConfig>, db_password: &str) -> Config {
         Config {
             logging: LoggingConfig {
                 level: "info".to_string(),
             },
-            neo4j: Neo4jConfig {
-                uri: "neo4j://localhost:7687".to_string(),
-                user: "neo4j".to_string(),
-                password: neo4j_password.to_string(),
-                batch_size: default_batch_size(),
-                flush_timeout_secs: default_flush_timeout(),
-                idle_timeout_secs: default_idle_timeout(),
+            surrealdb: SurrealConfig {
+                url: Some("ws://127.0.0.1:8000".to_string()),
+                password: Some(db_password.to_string()),
+                ..Default::default()
             },
             ledger: LedgerConfig {
                 fake_jwt_user: "u".to_string(),
@@ -367,20 +407,19 @@ mod tests {
                 starting_offset: None,
             },
             keycloak,
-            storage: StorageConfig::default(),
         }
     }
 
     #[test]
-    fn resolve_secrets_substitutes_neo4j_password() {
+    fn resolve_secrets_substitutes_db_password() {
         unsafe {
-            std::env::set_var("TEST_RS_NEO4J", "secretpw");
+            std::env::set_var("TEST_RS_DB", "secretpw");
         }
-        let mut cfg = make_test_config(None, "${TEST_RS_NEO4J}");
+        let mut cfg = make_test_config(None, "${TEST_RS_DB}");
         resolve_secrets(&mut cfg).unwrap();
-        assert_eq!(cfg.neo4j.password, "secretpw");
+        assert_eq!(cfg.surrealdb.password.as_deref(), Some("secretpw"));
         unsafe {
-            std::env::remove_var("TEST_RS_NEO4J");
+            std::env::remove_var("TEST_RS_DB");
         }
     }
 
@@ -388,7 +427,7 @@ mod tests {
     fn resolve_secrets_substitutes_client_credentials_secret() {
         unsafe {
             std::env::set_var("TEST_RS_CC", "cc-secret");
-            std::env::set_var("TEST_RS_NEO4J2", "n");
+            std::env::set_var("TEST_RS_DB2", "n");
         }
         let kc = KeycloakConfig {
             client_id: "id".to_string(),
@@ -397,7 +436,7 @@ mod tests {
                 client_secret: "${TEST_RS_CC}".to_string(),
             },
         };
-        let mut cfg = make_test_config(Some(kc), "${TEST_RS_NEO4J2}");
+        let mut cfg = make_test_config(Some(kc), "${TEST_RS_DB2}");
         resolve_secrets(&mut cfg).unwrap();
         match &cfg.keycloak.as_ref().unwrap().auth_method {
             KeycloakAuthMethod::ClientCredentials { client_secret } => {
@@ -407,7 +446,7 @@ mod tests {
         }
         unsafe {
             std::env::remove_var("TEST_RS_CC");
-            std::env::remove_var("TEST_RS_NEO4J2");
+            std::env::remove_var("TEST_RS_DB2");
         }
     }
 
@@ -417,7 +456,7 @@ mod tests {
             std::env::set_var("TEST_RS_USER", "alice");
             std::env::set_var("TEST_RS_PASS", "p4ss");
             std::env::set_var("TEST_RS_CS", "optcs");
-            std::env::set_var("TEST_RS_NEO4J3", "n");
+            std::env::set_var("TEST_RS_DB3", "n");
         }
         let kc = KeycloakConfig {
             client_id: "id".to_string(),
@@ -428,7 +467,7 @@ mod tests {
                 client_secret: Some("${TEST_RS_CS}".to_string()),
             },
         };
-        let mut cfg = make_test_config(Some(kc), "${TEST_RS_NEO4J3}");
+        let mut cfg = make_test_config(Some(kc), "${TEST_RS_DB3}");
         resolve_secrets(&mut cfg).unwrap();
         match &cfg.keycloak.as_ref().unwrap().auth_method {
             KeycloakAuthMethod::Password {
@@ -446,7 +485,7 @@ mod tests {
             std::env::remove_var("TEST_RS_USER");
             std::env::remove_var("TEST_RS_PASS");
             std::env::remove_var("TEST_RS_CS");
-            std::env::remove_var("TEST_RS_NEO4J3");
+            std::env::remove_var("TEST_RS_DB3");
         }
     }
 
@@ -454,7 +493,7 @@ mod tests {
     fn resolve_secrets_errors_with_actionable_message() {
         unsafe {
             std::env::remove_var("TEST_RS_MISSING");
-            std::env::set_var("TEST_RS_NEO4J_OK", "n");
+            std::env::set_var("TEST_RS_DB_OK", "n");
         }
         let kc = KeycloakConfig {
             client_id: "id".to_string(),
@@ -463,7 +502,7 @@ mod tests {
                 client_secret: "${TEST_RS_MISSING}".to_string(),
             },
         };
-        let mut cfg = make_test_config(Some(kc), "${TEST_RS_NEO4J_OK}");
+        let mut cfg = make_test_config(Some(kc), "${TEST_RS_DB_OK}");
         let err = resolve_secrets(&mut cfg).expect_err("must fail when env var unset");
         let msg = format!("{:#}", err);
         assert!(
@@ -476,14 +515,14 @@ mod tests {
             "missing op run guidance: {msg}"
         );
         unsafe {
-            std::env::remove_var("TEST_RS_NEO4J_OK");
+            std::env::remove_var("TEST_RS_DB_OK");
         }
     }
 
     #[test]
     fn resolve_config_runs_secret_substitution() {
         unsafe {
-            std::env::set_var("TEST_RC_NEO4J", "neo-pw");
+            std::env::set_var("TEST_RC_DB", "db-pw");
             std::env::set_var("TEST_RC_CS", "kc-secret");
         }
 
@@ -493,10 +532,9 @@ active_profile = "p"
 [logging]
 level = "info"
 
-[neo4j]
-uri = "neo4j://127.0.0.1:7687"
-user = "neo4j"
-password = "${TEST_RC_NEO4J}"
+[surrealdb]
+url = "ws://127.0.0.1:8000"
+password = "${TEST_RC_DB}"
 
 [profiles.p.ledger]
 fake_jwt_user = "u"
@@ -512,7 +550,7 @@ client_secret = "${TEST_RC_CS}"
         let config_file: ConfigFile = toml::from_str(toml_src).unwrap();
         let cfg = resolve_config(config_file, None).unwrap();
 
-        assert_eq!(cfg.neo4j.password, "neo-pw");
+        assert_eq!(cfg.surrealdb.password.as_deref(), Some("db-pw"));
         match &cfg.keycloak.as_ref().unwrap().auth_method {
             KeycloakAuthMethod::ClientCredentials { client_secret } => {
                 assert_eq!(client_secret, "kc-secret");
@@ -521,7 +559,7 @@ client_secret = "${TEST_RC_CS}"
         }
 
         unsafe {
-            std::env::remove_var("TEST_RC_NEO4J");
+            std::env::remove_var("TEST_RC_DB");
             std::env::remove_var("TEST_RC_CS");
         }
     }
@@ -534,7 +572,7 @@ client_secret = "${TEST_RC_CS}"
         unsafe {
             std::env::remove_var("RC_INACTIVE_VAR_DO_NOT_SET");
             std::env::set_var("RC_ACTIVE_CS", "active-cs");
-            std::env::set_var("RC_ACTIVE_NEO4J", "n");
+            std::env::set_var("RC_ACTIVE_DB", "n");
         }
 
         let toml_src = r#"
@@ -543,10 +581,9 @@ active_profile = "active"
 [logging]
 level = "info"
 
-[neo4j]
-uri = "neo4j://127.0.0.1:7687"
-user = "neo4j"
-password = "${RC_ACTIVE_NEO4J}"
+[surrealdb]
+url = "ws://127.0.0.1:8000"
+password = "${RC_ACTIVE_DB}"
 
 [profiles.active.ledger]
 fake_jwt_user = "u"
@@ -572,11 +609,51 @@ client_secret = "${RC_INACTIVE_VAR_DO_NOT_SET}"
         let config_file: ConfigFile = toml::from_str(toml_src).unwrap();
         let cfg = resolve_config(config_file, None)
             .expect("lazy substitution: inactive profile's unresolved ${VAR} must not error");
-        assert_eq!(cfg.neo4j.password, "n");
+        assert_eq!(cfg.surrealdb.password.as_deref(), Some("n"));
 
         unsafe {
             std::env::remove_var("RC_ACTIVE_CS");
-            std::env::remove_var("RC_ACTIVE_NEO4J");
+            std::env::remove_var("RC_ACTIVE_DB");
         }
+    }
+
+    fn full_surreal_config() -> SurrealConfig {
+        SurrealConfig {
+            url: Some("ws://from-file:8000".into()),
+            namespace: Some("ns".into()),
+            database: Some("db".into()),
+            username: Some("user".into()),
+            password: Some("file-pw".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn surreal_env_overrides_config_file() {
+        let env = |name: &str| match name {
+            "SURREAL_URL" => Some("ws://from-env:9000".to_string()),
+            "SURREAL_PASSWORD" => Some("env-pw".to_string()),
+            _ => None,
+        };
+        let db = full_surreal_config().resolve_with(env).unwrap();
+        assert_eq!(db.url, "ws://from-env:9000");
+        assert_eq!(db.password, "env-pw");
+        assert_eq!(db.namespace, "ns");
+        assert_eq!(db.username, "user");
+    }
+
+    #[test]
+    fn surreal_missing_setting_names_env_var() {
+        let mut cfg = full_surreal_config();
+        cfg.database = None;
+        let err = cfg.resolve_with(|_| None).unwrap_err();
+        assert!(format!("{err:#}").contains("SURREAL_DATABASE"));
+    }
+
+    #[test]
+    fn surreal_debug_never_prints_password() {
+        let db = full_surreal_config().resolve_with(|_| None).unwrap();
+        let printed = format!("{db:?} {:?}", full_surreal_config());
+        assert!(!printed.contains("file-pw"), "{printed}");
     }
 }

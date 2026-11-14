@@ -1,6 +1,13 @@
 # Event Graph Indexer
 
-A Rust tool for syncing Daml/Canton ledger data to a Neo4j graph database. It streams ledger updates in real-time and creates a graph representation of transactions, contracts, and their relationships.
+Streams Daml/Canton ledger data into a [SurrealDB](https://surrealdb.com) server
+as a graph: transactions, created contracts, exercised choices and parties,
+linked by relations. It follows the ledger in real time and resumes where it
+left off.
+
+The indexer is one client of the database among others (a graph viewer,
+SurrealDB Studio, ...). It connects over the network as a database user and
+never opens a database folder directly.
 
 ## Supported Daml SDK
 
@@ -8,49 +15,99 @@ This app was tested with sdk-version 3.4.8. The ledger sync uses Ledger API v2.
 
 ## Features
 
-- **Resilient Sync**: Automatically reconnects on stream errors with exponential backoff
-- **Resume Capability**: Resumes from the last processed offset stored in Neo4j
-- **ACS Loading**: Loads the Active Contract Set before streaming to ensure all referenced contracts exist
-- **JWT Token Management**: Supports Keycloak OAuth2 (client credentials or password flow) with automatic token refresh
-- **Fresh Start Mode**: Option to clear Neo4j and start from current ledger end
-- **Optimized Performance**: Batched writes and indexed queries for high throughput
+- **Resilient sync**: reconnects to the ledger with exponential backoff; database
+  writes are retried with a growing delay (1 s, 2 s, 5 s, … up to 30 s) while the
+  server is down, keeping the data in memory instead of dropping it
+- **Resume**: continues from the last offset stored in the database
+- **ACS loading**: loads the Active Contract Set before streaming, so contracts
+  used later already exist
+- **JWT token management**: Keycloak OAuth2 (client credentials or password flow)
+  with automatic token refresh
+- **Fresh start**: deletes the indexer's data and starts from the current ledger end
+- **Batched writes**: one database transaction per batch of updates, one
+  statement per table
 
-## Graph Schema
+## Data model
 
-### Nodes
+### Tables
 
-| Label | Description | Key Properties |
-|-------|-------------|----------------|
-| `Transaction` | A ledger transaction | `offset`, `update_id`, `command_id`, `effective_at`, `record_time` |
-| `Created` | A created contract event | `contract_id`, `template_name`, `signatories`, `offset`, `node_id` |
-| `Exercised` | An exercised choice event | `offset`, `node_id`, `choice_name`, `target_contract_id`, `consuming` |
-| `Party` | A party on the ledger | `party_id` |
+| Table | Record id | Main fields |
+|-------|-----------|-------------|
+| `transaction` | `transaction:<offset>` | `name` (`TX@<offset>`), `offset`, `update_id`, `command_id`, `workflow_id`, `synchronizer_id`, `effective_at`, `record_time`, `trace_context { traceparent, tracestate }` |
+| `created` | `created:<contract_id>` | `name` (`<Entity>@<offset>`), `contract_id`, `template_name`, `template { package_id, module_name, entity_name }`, `signatories [..]`, `offset`, `node_id`, `created_at`, `create_arguments { .. }`, `from_acs` |
+| `exercised` | `exercised:[<offset>, <node_id>]` | `name` (`<Choice>@<offset>`), `choice_name`, `target_contract_id`, `acting_parties [..]`, `consuming`, `result_contract_ids [..]`, `offset`, `node_id`, `last_descendant_node_id`, `transaction_effective_at`, `choice_argument { .. }` |
+| `party` | `party:<party_id>` | `party_id`, `name` (the part before `::`) |
+| `sync_state` | `sync_state:singleton`, `sync_state:stream` | ACS load marker (`acs_offset`, `acs_continuation_token`, `acs_complete`); last written offset (`last_offset`) |
 
-### Relationships
+Record ids come from the ledger, so replaying an update updates the same
+records instead of adding new ones. Timestamps are SurrealQL datetimes.
+Contracts loaded from the ACS have `offset = -1`, `node_id = 0` and
+`from_acs = true`.
 
-| Type | From | To | Description |
-|------|------|----|-------------|
-| `ACTION` | Transaction | Created/Exercised | Root-level events in a transaction |
-| `CONSEQUENCE` | Exercised | Created/Exercised | Child events resulting from an exercise |
-| `TARGET` | Exercised | Created | The contract being exercised |
-| `CONSUMES` | Exercised | Created | Contract consumed by a consuming choice |
-| `REQUESTED` | Party | Transaction | Party that requested the transaction |
+### Relations
+
+| Relation | From → To | Meaning |
+|----------|-----------|---------|
+| `action` | transaction → created / exercised | Root-level events of a transaction |
+| `consequence` | exercised → created / exercised | Child events of an exercise |
+| `target` | exercised → created | The contract the choice was exercised on |
+| `consumes` | exercised → created | Contract archived by a consuming choice |
+| `requested` | party → transaction | Party that submitted the transaction |
+
+Each edge has a stable id (for example `target:[<offset>, <node_id>]`) and a
+unique index on `in, out`, so it is written at most once. `target` and
+`consumes` are only written when the contract is in the database.
+
+### Contract and choice arguments
+
+`create_arguments` and `choice_argument` keep the shape of the Daml value:
+
+| Daml | Stored as |
+|------|-----------|
+| Record | object |
+| List | array |
+| TextMap | object |
+| GenMap | array of `{ key, value }` |
+| Variant | `{ constructor, value }` |
+| Enum | the constructor name |
+| Optional | the value, or `null` |
+| Timestamp / Date | datetime |
+| Numeric | decimal |
+
+So nested fields can be queried directly:
+
+```sql
+SELECT contract_id, create_arguments.owner
+FROM created
+WHERE create_arguments.address.city = 'Zurich';
+```
 
 ### Indexes
 
-The following indexes are automatically created for optimal query performance:
-
-- `Created(contract_id)` - For TARGET/CONSUMES lookups
-- `Created(offset, node_id)` - For CONSEQUENCE edge creation
-- `Exercised(offset, node_id)` - For ACTION and CONSEQUENCE edge creation
-- `Transaction(offset)` - For resume point queries
-- `Party(party_id)` - For party lookups
+Defined at startup with `DEFINE ... IF NOT EXISTS`: the unique `in, out`
+indexes on every relation, plus `created(offset, node_id)`,
+`created(template_name)`, `created(from_acs)`, `exercised(choice_name)`,
+`exercised(target_contract_id)` and `transaction(update_id)`.
 
 ## Prerequisites
 
-### Neo4j
+### SurrealDB
 
-Download [Neo4J Desktop](https://neo4j.com/download/) and create a local database.
+Install SurrealDB 4 ([instructions](https://surrealdb.com/install)) and run a
+server, for example with on-disk storage:
+
+```bash
+surreal start --user root --pass '<root password>' --bind 127.0.0.1:8000 surrealkv://data/event-graph
+```
+
+As root, create the namespace, the database and the indexer's user once (the
+indexer itself never signs in as root):
+
+```sql
+DEFINE NAMESPACE canton; USE NS canton;
+DEFINE DATABASE event_graph; USE DB event_graph;
+DEFINE USER streamer ON DATABASE PASSWORD '<password>' ROLES EDITOR;
+```
 
 ### Canton / Sandbox
 
@@ -58,8 +115,6 @@ You can connect to:
 - Canton Sandbox (default settings)
 - Canton 3.4+ via Docker
 - Canton Network validator node with port forwarding
-
-Adjust the settings in `config/config.toml` accordingly.
 
 ## Installation
 
@@ -69,52 +124,43 @@ cargo build --release -p event-graph-indexer
 
 ## Configuration
 
-Create a `config/config.toml` file based on the example:
+Create `config/config.toml` from the example:
 
 ```bash
 cp config/config.toml.example config/config.toml
 ```
 
-### Configuration Options
+The `[surrealdb]` section holds the connection settings. Each one can be set (or
+overridden) with an environment variable, which is the recommended way for the
+password:
 
-```toml
-[logging]
-level = "info"  # debug, info, warn, error
+| Setting | Environment variable | Example |
+|---------|----------------------|---------|
+| `url` | `SURREAL_URL` | `ws://127.0.0.1:8000` |
+| `namespace` | `SURREAL_NAMESPACE` | `canton` |
+| `database` | `SURREAL_DATABASE` | `event_graph` |
+| `username` | `SURREAL_USERNAME` | `streamer` |
+| `password` | `SURREAL_PASSWORD` | — |
 
-[neo4j]
-uri = "neo4j://127.0.0.1:7687"
-user = "neo4j"
-password = "password"
+The password is never logged. See the root README ("Secrets") for providing it
+through 1Password, a `.env` file or another secret manager.
 
-[ledger]
-fake_jwt_user = "alice"  # Used when --use-keycloak is not specified
-parties = ["party-id-1", "party-id-2"]  # Party IDs to subscribe to
-url = "https://ledger.example.com:5001"
-
-# Optional: Keycloak for real JWT tokens
-[keycloak]
-client_id = "your-client-id"
-token_endpoint = "https://keycloak.example.com/auth/realms/realm/protocol/openid-connect/token"
-# For client credentials flow:
-grant_type = "client_credentials"
-client_secret = "your-secret"
-# Or for password flow:
-# grant_type = "password"
-# username = "user"
-# password = "pass"
-```
+Other `[surrealdb]` settings: `batch_size` (updates per database transaction,
+default 100), `flush_timeout_secs` (default 1) and `idle_timeout_secs`
+(default 60). Ledger and Keycloak settings live in named profiles; see
+`config/config.toml.example`.
 
 ## Commands
 
 ### sync
 
-Continuously syncs ledger updates to Neo4j with automatic reconnection.
+Continuously syncs ledger updates to SurrealDB with automatic reconnection.
 
 ```bash
-# Normal sync (resumes from last offset in Neo4j)
+# Normal sync (resumes from the last offset in the database)
 cargo run --release -p event-graph-indexer -- sync --use-keycloak
 
-# Fresh start (clears Neo4j, loads current ACS, streams from ledger end)
+# Fresh start (deletes the indexer data, loads current ACS, streams from ledger end)
 cargo run --release -p event-graph-indexer -- sync --use-keycloak --fresh
 
 # Fresh start from ~7 days ago (resolves the offset via the Ledger API, implies --fresh)
@@ -123,29 +169,29 @@ cargo run --release -p event-graph-indexer -- sync --use-keycloak --from-days-ag
 
 Options:
 - `--config-file <path>`: Path to config.toml (default: `./config/config.toml`)
+- `--profile <name>`: Profile to use (overrides `active_profile`)
 - `--use-keycloak`: Use Keycloak for JWT token management
 - `--access-token <token>`: Provide a static JWT token
-- `--fresh`: Clear database and start from current ledger end
-- `--from-days-ago <N>`: Clear database and start a fresh sync from the offset current ~N days ago (resolved by binary search over the Ledger API). Implies `--fresh`.
+- `--fresh`: Delete the indexer data and start from the current ledger end
+- `--from-days-ago <N>`: Fresh start from the offset current ~N days ago. Implies `--fresh`.
+
+`--fresh` deletes the records in the indexer's tables (with `DELETE`); the
+tables and indexes stay defined, and nothing else in the database is touched.
 
 ### benchmark
 
-Measures Canton stream throughput without writing to Neo4j.
+Measures Canton stream throughput without writing to the database.
 
 ```bash
 cargo run --release -p event-graph-indexer -- benchmark --use-keycloak --count 10000
 ```
 
-Options:
-- `--count <n>`: Number of updates to process (default: 10000)
-- `--begin-offset <n>`: Starting offset (default: pruning offset)
+### print-surql
 
-### print-cypher
-
-Prints the generated Cypher queries for debugging.
+Prints the SurrealQL writes generated for each update (no database needed).
 
 ```bash
-cargo run --release -p event-graph-indexer -- print-cypher \
+cargo run --release -p event-graph-indexer -- print-surql \
   --access-token <token> \
   --party <party-id> \
   --url <ledger-url> \
@@ -154,52 +200,49 @@ cargo run --release -p event-graph-indexer -- print-cypher \
 
 ## Using the justfile
 
-Common operations are available via [just](https://github.com/casey/just):
+```bash
+just indexer-run            # sync with Keycloak
+just indexer-fresh          # fresh start
+just indexer-sandbox        # sync against a local sandbox (fake JWT)
+just indexer-stop           # stop the sync process
+```
+
+## Querying the graph
+
+```sql
+-- Latest transactions requested by a party
+SELECT ->requested->transaction.* AS txs FROM party:⟨alice::1220...⟩;
+
+-- Exercises on a contract
+SELECT choice_name, acting_parties, consuming
+FROM exercised WHERE target_contract_id = '00...';
+
+-- The event tree of a transaction
+SELECT ->action->exercised->consequence->? AS children FROM transaction:12345;
+
+-- Active contracts per template (not consumed)
+SELECT template_name, count() AS active FROM created
+WHERE count(<-consumes) = 0 GROUP BY template_name;
+```
+
+## Tests
 
 ```bash
-# Start syncing with Keycloak
-just indexer-run
-
-# Fresh start
-just indexer-fresh
-
-# Stop the sync process
-just indexer-stop
+cargo test -p event-graph-indexer
 ```
 
-## Querying the Graph
-
-Example Cypher queries:
-
-```cypher
-// Find all transactions for a party
-MATCH (p:Party {party_id: "alice::1220..."})-[:REQUESTED]->(t:Transaction)
-RETURN t ORDER BY t.offset DESC LIMIT 10
-
-// Find all exercises on a specific contract
-MATCH (e:Exercised)-[:TARGET]->(c:Created {contract_id: "00..."})
-RETURN e.choice_name, e.acting_parties, e.consuming
-
-// Trace the full transaction tree
-MATCH path = (t:Transaction)-[:ACTION*]->(n)
-WHERE t.offset = 12345
-RETURN path
-
-// Find all active contracts (not consumed)
-MATCH (c:Created)
-WHERE NOT (c)<-[:CONSUMES]-()
-RETURN c.template_name, count(*) as active_count
-```
-
-You can import the saved Cypher query collection from the `config/` folder into Neo4j Desktop.
+The integration tests in `tests/surreal_integration.rs` start a throwaway
+in-memory server (`surreal start ... memory`) on a free port for each test, so
+they never touch real data. They need the `surreal` program on the `PATH` (or
+`SURREAL_BIN` pointing at it) and are skipped with a message otherwise.
 
 ## Architecture
 
 ```
-┌─────────────────┐    ┌──────────────┐    ┌─────────────┐
-│  Canton Ledger  │───▶│ event-graph- │───▶│   Neo4j     │
-│  (gRPC Stream)  │    │ indexer      │    │   Graph DB  │
-└─────────────────┘    └──────────────┘    └─────────────┘
+┌─────────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Canton Ledger  │───▶│ event-graph- │───▶│  SurrealDB   │◀── graph viewer,
+│  (gRPC Stream)  │    │ indexer      │ ws │  server      │    SurrealDB Studio
+└─────────────────┘    └──────────────┘    └──────────────┘
         │                     │
         │                     ▼
         │              ┌──────────────┐
@@ -208,39 +251,8 @@ You can import the saved Cypher query collection from the `config/` folder into 
                        └──────────────┘
 ```
 
-1. **Stream Updates**: Connects to Canton's gRPC update stream
-2. **Generate Cypher**: Converts ledger events to Neo4j Cypher queries
-3. **Batch Write**: Commits batches of 100 updates for throughput
-4. **Auto-reconnect**: Handles stream disconnections with exponential backoff
-5. **Token Refresh**: Background thread refreshes JWT before expiry
-
-## Performance
-
-With proper indexes, the sync achieves:
-- ~2.5-3.5 offsets/second processing rate
-- ~400-500ms per batch of 100 updates (~900 queries)
-- Can keep up with ledger activity of ~1.3 updates/second
-
-## Troubleshooting
-
-### Sync falling behind
-
-If the sync cannot keep up with incoming updates:
-1. Check Neo4j has indexes: `SHOW INDEXES`
-2. Increase Neo4j memory allocation
-3. Consider running Neo4j on faster storage (SSD)
-
-### Connection errors
-
-The sync automatically reconnects with exponential backoff. Check:
-1. Network connectivity to ledger
-2. JWT token validity (use `--use-keycloak` for auto-refresh)
-3. Neo4j availability
-
-### Duplicate data
-
-The sync uses MERGE operations to prevent duplicates on reconnection. If duplicates appear, verify that the indexes exist and the sync is using the latest code.
-
-## Learn Cypher
-
-You can explore the event graph with Cypher queries. Neo4j Desktop includes a built-in Cypher tutorial.
+1. **Stream updates** from Canton's gRPC update stream
+2. **Convert** each transaction into rows and edges (`model.rs`)
+3. **Batch write** up to `batch_size` updates per database transaction (`store.rs`)
+4. **Reconnect** on ledger or database errors, with backoff
+5. **Refresh tokens** in the background before they expire
