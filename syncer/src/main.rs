@@ -72,7 +72,7 @@ enum Commands {
         /// Use Keycloak to obtain a real JWT token (requires keycloak section in profile)
         #[arg(long)]
         use_keycloak: bool,
-        /// Fresh start: delete the indexer data in SurrealDB, load current ACS, and stream from ledger end
+        /// Fresh start: delete the synced data in SurrealDB, load current ACS, and stream from ledger end
         #[arg(long)]
         fresh: bool,
         /// Start a fresh sync from the offset that was current N days ago

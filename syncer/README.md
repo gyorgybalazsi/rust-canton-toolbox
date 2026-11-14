@@ -5,13 +5,13 @@ as a graph: transactions, created contracts, exercised choices and parties,
 linked by relations. It follows the ledger in real time and resumes where it
 left off.
 
-The indexer is one client of the database among others (a graph viewer,
+The syncer is one client of the database among others (a graph viewer,
 SurrealDB Studio, ...). It connects over the network as a database user and
 never opens a database folder directly.
 
 ## Supported Daml SDK
 
-This app was tested with sdk-version 3.4.8. The ledger sync uses Ledger API v2.
+The Ledger API v2 bindings are built from the Canton 3.7.1 protos. The syncer was last tested end to end against SDK 3.4.8.
 
 ## Features
 
@@ -23,7 +23,7 @@ This app was tested with sdk-version 3.4.8. The ledger sync uses Ledger API v2.
   used later already exist
 - **JWT token management**: Keycloak OAuth2 (client credentials or password flow)
   with automatic token refresh
-- **Fresh start**: deletes the indexer's data and starts from the current ledger end
+- **Fresh start**: deletes the synced data and starts from the current ledger end
 - **Batched writes**: one database transaction per batch of updates, one
   statement per table
 
@@ -100,8 +100,8 @@ server, for example with on-disk storage:
 surreal start --user root --pass '<root password>' --bind 127.0.0.1:8000 surrealkv://data/event-graph
 ```
 
-As root, create the namespace, the database and the indexer's user once (the
-indexer itself never signs in as root):
+As root, create the namespace, the database and the syncer's user once (the
+syncer itself never signs in as root):
 
 ```sql
 DEFINE NAMESPACE canton; USE NS canton;
@@ -160,7 +160,7 @@ Continuously syncs ledger updates to SurrealDB with automatic reconnection.
 # Normal sync (resumes from the last offset in the database)
 cargo run --release -p syncer -- sync --use-keycloak
 
-# Fresh start (deletes the indexer data, loads current ACS, streams from ledger end)
+# Fresh start (deletes the synced data, loads current ACS, streams from ledger end)
 cargo run --release -p syncer -- sync --use-keycloak --fresh
 
 # Fresh start from ~7 days ago (resolves the offset via the Ledger API, implies --fresh)
@@ -172,10 +172,10 @@ Options:
 - `--profile <name>`: Profile to use (overrides `active_profile`)
 - `--use-keycloak`: Use Keycloak for JWT token management
 - `--access-token <token>`: Provide a static JWT token
-- `--fresh`: Delete the indexer data and start from the current ledger end
+- `--fresh`: Delete the synced data and start from the current ledger end
 - `--from-days-ago <N>`: Fresh start from the offset current ~N days ago. Implies `--fresh`.
 
-`--fresh` deletes the records in the indexer's tables (with `DELETE`); the
+`--fresh` deletes the records in the syncer's tables (with `DELETE`); the
 tables and indexes stay defined, and nothing else in the database is touched.
 
 ### benchmark

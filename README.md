@@ -1,16 +1,25 @@
 # canton-event-graph-syncer
 
-## Overview
+Syncs a Canton ledger's event graph into [SurrealDB](https://surrealdb.com).
+The `syncer` program streams transactions, created contracts, exercised choices
+and parties from the Ledger API v2 and writes them as a graph: tables for the
+nodes, relation tables for the edges, and contract and choice arguments as
+nested objects you can query by path. It loads the Active Contract Set first,
+follows the ledger in real time, and resumes from the last stored offset.
 
-A Rust workspace for interacting with Canton/Daml ledgers: streaming events, submitting commands with Rust types generated from Daml models, and syncing the ledger event graph into SurrealDB.
+The workspace also holds the Rust Ledger API client libraries the syncer is
+built on. Why Rust? Because it's not an officially supported client language,
+and building from scratch is the best way to understand the Ledger API and
+`.dalf` encoding.
 
-Why Rust? Because it's not an officially supported client language, and building from scratch is the best way to understand the Ledger API and `.dalf` encoding.
+See also: [A Daml ledger tells a story](https://discuss.daml.com/t/blog-post-a-daml-ledger-tells-a-story-it-s-time-to-show-it-to-everyone/6734).
 
 ## Prerequisites
 
-- **Daml SDK** `3.7.1+` (`dpm install 3.7.1`)
 - **[protoc](https://protobuf.dev/installation/)** (Protocol Buffer Compiler)
-- **[SurrealDB](https://surrealdb.com/install)** `4.x` server (for syncer; the `surreal` program also runs its integration tests)
+- **[SurrealDB](https://surrealdb.com/install)** `4.x` server for the syncer
+  (the `surreal` program also runs the syncer's integration tests)
+- **Daml SDK** `3.7.1+` (`dpm install 3.7.1`), for a local sandbox and the Daml examples
 - **[just](https://github.com/casey/just)** command runner (optional, for convenience recipes)
 
 Add protoc to rust-analyzer in `.vscode/settings.json`:
@@ -22,6 +31,20 @@ Add protoc to rust-analyzer in `.vscode/settings.json`:
     }
 }
 ```
+
+## Quick start
+
+1. Set up a SurrealDB namespace, database and user for the syncer (see
+   [syncer README → SurrealDB](syncer/README.md#surrealdb)).
+2. Copy `syncer/config/config.toml.example` to `syncer/config/config.toml`
+   (gitignored) and fill in your ledger profiles and database settings.
+3. Provide the secrets (next section).
+4. Run it:
+
+   ```
+   just sync-sandbox      # against a local sandbox, with a fake JWT
+   just sync-run          # against a remote ledger, with Keycloak auth
+   ```
 
 ## Secrets
 
@@ -84,15 +107,37 @@ Set `SECRETS_RUNNER` to any command prefix that injects environment variables
 and then runs the rest of the command, e.g.
 `SECRETS_RUNNER="doppler run --"` or `SECRETS_RUNNER="aws-vault exec dev --"`.
 
+## Running
+
+Common tasks are available as `just` recipes:
+
+```
+just                           # list all recipes
+just sync-run                  # sync with Keycloak auth (release mode)
+just sync-fresh                # fresh start: clear synced data + reload ACS
+just sync-sandbox              # sync against local sandbox (fake JWT)
+just sync-sandbox-fresh        # fresh start against local sandbox
+just sync-stop                 # stop the syncer
+just get-update <update-id>    # look up one update by its ID
+just test-nested               # run nested-test integration test
+just sandbox-init-ticketoffer  # init sandbox with ticketoffer example
+```
+
+Without `just`, run the syncer with `cargo run --release -p syncer -- sync ...`.
+Its subcommands are `sync`, `benchmark` (raw stream throughput, no database
+writes) and `print-surql` (print the SurrealQL writes without a database); see
+the [syncer README](syncer/README.md#commands) for their options and for the
+data model and example queries.
+
 ## Workspace Crates
 
 | Crate | Type | Description |
 |-------|------|-------------|
+| **syncer** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
 | **ledger-api** | lib | Generated Protobuf/gRPC bindings for the Daml Ledger API v2 |
 | **client** | bin/lib | CLI and library wrapping Ledger API operations (streaming, JWT, party management) |
 | **daml-type-rep** | lib | Type representations for Daml values (built-in types, numeric scaling, template IDs) |
 | **derive-lapi-access** | proc-macro | Derive macro implementing the `LapiAccess` trait for gRPC type conversions |
-| **syncer** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
 | **submit** | lib | Library for submitting Daml contracts and exercising choices via gRPC |
 | **sandbox-init** | bin | CLI tool to start a Daml sandbox and run initialization scripts from DAR files |
 | **test** | lib | Integration tests for the `LapiAccess` trait paired with Daml examples, using checked-in generated types in `test/generated/` |
@@ -110,46 +155,18 @@ cargo run -p client -- <subcommand> <params>
 | `stream-updates` | Stream ledger updates for a party |
 | `stream-transactions` | Stream transactions for a party |
 | `parties` | List parties, optionally filtered by substring |
+| `get-update-by-id` | Look up a single update (transaction) by its ID |
 
 Run `cargo run -p client -- <subcommand> --help` for parameter details.
-
-### syncer
-
-Streams the Canton event graph into a SurrealDB server with:
-- Resilient sync with automatic reconnection and backoff, for both the ledger and the database
-- Keycloak OAuth2 authentication (client credentials or password grant)
-- Contract and choice arguments stored as nested objects, queryable by path
-- ACS (Active Contract Set) bootstrapping
-- Configurable batching, flush timeouts, and idle detection
-- Multi-profile config support (local, devnet, mainnet)
-
-Configuration goes in `syncer/config/config.toml` (gitignored).
-See the [syncer README](syncer/README.md) for the data model.
-
-See also: [A Daml ledger tells a story](https://discuss.daml.com/t/blog-post-a-daml-ledger-tells-a-story-it-s-time-to-show-it-to-everyone/6734).
 
 ### Generating Rust types from DARs
 
 The DAR-to-Rust code generator lives in its own repository,
-[daml-rust-codegen](https://github.com/gyorgybalazsi/daml-rust-codegen). It produces structs that use this
-workspace's `daml-type-rep`, `derive-lapi-access`, and `ledger-api` crates.
-The output for the example DARs used by the `test` crate is checked in under
-`test/generated/`; regenerate it with that tool when the Daml examples change.
-
-## Running
-
-Common tasks are available as `just` recipes:
-
-```
-just                              # list all recipes
-just sync-run                  # sync with Keycloak auth (release mode)
-just sync-fresh                # fresh start: clear synced data + reload ACS
-just sync-sandbox              # sync against local sandbox (fake JWT)
-just sync-sandbox-fresh        # fresh start against local sandbox
-just sync-stop                 # stop the sync process
-just test-nested                  # run nested-test integration test
-just sandbox-init-ticketoffer     # init sandbox with ticketoffer example
-```
+[daml-rust-codegen](https://github.com/gyorgybalazsi/daml-rust-codegen). It
+produces structs that use this workspace's `daml-type-rep`,
+`derive-lapi-access`, and `ledger-api` crates. The output for the example DARs
+used by the `test` crate is checked in under `test/generated/`; regenerate it
+with that tool when the Daml examples change.
 
 ## Daml Examples
 

@@ -1,6 +1,6 @@
 //! SurrealDB access: connecting, defining the schema, and writing batches.
 //!
-//! The indexer is one client among several (graph viewers, SurrealDB Studio)
+//! The syncer is one client among several (graph viewers, SurrealDB Studio)
 //! of the same server, so it only ever connects over the network as a
 //! database-level user, and only touches the configured namespace/database.
 
@@ -310,10 +310,10 @@ impl Store {
         check_errors(&mut response)
     }
 
-    /// Deletes every record the indexer wrote (for `--fresh`). Only the data
+    /// Deletes every record the syncer wrote (for `--fresh`). Only the data
     /// is deleted; tables and indexes stay defined.
     pub async fn clear_all(&self) -> Result<()> {
-        info!("Clearing all indexer data from SurrealDB...");
+        info!("Clearing all synced data from SurrealDB...");
         let mut response = self
             .db
             .query(

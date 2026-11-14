@@ -327,7 +327,7 @@ pub async fn run_resilient_sync(
     // and waits (with backoff) while the server is unreachable.
     let store = Store::connect_with_retry(&sync_config.db).await;
 
-    // If fresh start, clear the indexer's data first
+    // If fresh start, clear the synced data first
     if fresh {
         store.clear_all().await?;
     }

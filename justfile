@@ -35,7 +35,7 @@ sync-sandbox-fresh:
 
 # Stop the sync
 sync-stop:
-    pkill -f syncer || true
+    pkill -x syncer || true
 
 # Look up a single update (transaction) by its ID
 get-update update_id profile="mainnet":
