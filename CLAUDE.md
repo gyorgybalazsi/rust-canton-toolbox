@@ -8,7 +8,7 @@ test, and land changes.
 ## What this is
 
 A Rust workspace for interacting with Canton/Daml ledgers: streaming events,
-generating Rust types from Daml models, submitting commands, and syncing the
+using Rust types generated from Daml models, submitting commands, and syncing the
 ledger event graph into SurrealDB. Rust is a deliberately unsupported client language here —
 the point is to understand the Ledger API and `.dalf` encoding from scratch.
 
@@ -17,21 +17,18 @@ the point is to understand the Ledger API and `.dalf` encoding from scratch.
 | Crate | Role |
 |---|---|
 | `ledger-api` | Generated gRPC/protobuf bindings for the Canton Ledger API v2 (tonic/prost). `build.rs` compiles vendored protos under `ledger-api/resources/protobuf` into `src/pb/` **on every build**. |
-| `codegen` | Generates Rust types from `.dar` files. `build.rs` downloads the Daml LF proto for the version in `codegen/daml-sdk-version` from GitHub releases. Checked-in output lives in `codegen/generated/`. |
 | `daml-type-rep` | Daml type representations: built-in types, `LapiAccess`/`ToCreateArguments` traits, template IDs, numeric scale. |
 | `derive-lapi-access` | Proc-macros deriving `LapiAccess` / `ToCreateArguments`. |
 | `client` | Ledger API client helpers: active contracts, JWT, party/user management, DAR upload, run-script. |
 | `submit` | Command submission helpers (`create_contract`, `exercise_choice`). |
 | `sandbox-init` | Starts a Daml sandbox, uploads DARs, runs an init script. |
-| `test` (`daml-model-rep-examples`) | Hand-written **integration** examples that exercise generated types against a live sandbox. |
-| `event-graph-indexer` | CLI that syncs ACS/updates into a SurrealDB server (Keycloak auth, 1Password). |
+| `test` (`daml-model-rep-examples`) | Hand-written **integration** examples that exercise generated types against a live sandbox. The generated types are checked in under `test/generated/`; they come from the standalone code generator at https://github.com/gyorgybalazsi/daml-rust-codegen. |
+| `canton-event-graph-sync` | CLI that syncs ACS/updates into a SurrealDB server (Keycloak auth, 1Password). |
 | `wallet` | Placeholder crate (stub). |
 
 ## Build quirks (read before touching the build)
 
-- **`protoc` is required.** `ledger-api` and `codegen` build scripts invoke it.
-  `codegen/build.rs` also makes a network call to download the matching Daml LF
-  proto on a clean build.
+- **`protoc` is required.** The `ledger-api` build script invokes it.
 - **`ledger-api/src/pb/*.rs` is generated** by `build.rs` on every compile —
   never hand-edit it. Suppress lints on it via `#[allow(...)]` on the including
   modules in `ledger-api/src/lib.rs`, not in the generated files.
@@ -58,9 +55,9 @@ commented `#[allow(...)]` (see `ledger-api/src/lib.rs`, `test/src/lib.rs`).
 
 `cargo test --no-run` only **compiles** tests. The integration tests in `test/`
 and `submit/` need a live Daml sandbox (and DARs built with `dpm`), so they are
-not run in CI. `event-graph-indexer/tests/surreal_integration.rs` starts its own
+not run in CI. `canton-event-graph-sync/tests/surreal_integration.rs` starts its own
 throwaway in-memory server with the `surreal` program and skips itself when that
-isn't installed: run it with `cargo test -p event-graph-indexer`. Run the
+isn't installed: run it with `cargo test -p canton-event-graph-sync`. Run the
 sandbox ones manually via the `justfile` (e.g. `just test-nested`, `just sandbox-init-*`).
 See `justfile` for all recipes.
 
@@ -84,4 +81,4 @@ the `/rust-ci` skill before pushing to avoid a red CI.
   are gitignored.
 - Local-only files (gitignored): `CLAUDE.local.md`, `.claude/` (except the
   shared `.claude/settings.json` and `.claude/skills/`),
-  `event-graph-indexer/config/config.toml`, `secrets.env.1password`, `.env`.
+  `canton-event-graph-sync/config/config.toml`, `secrets.env.1password`, `.env`.

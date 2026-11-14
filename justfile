@@ -13,39 +13,34 @@ secrets_runner := env("SECRETS_RUNNER", "op run " + op_account_flag + "--env-fil
 default:
     @just --list
 
-# Run indexer with Keycloak authentication (release mode)
-indexer-run:
+# Run the sync with Keycloak authentication (release mode)
+sync-run:
     {{secrets_runner}} \
-      cargo run --release -p event-graph-indexer -- sync --use-keycloak 2>&1 | tee sync.log
+      cargo run --release -p canton-event-graph-sync -- sync --use-keycloak 2>&1 | tee sync.log
 
-# Fresh start: delete the indexer data in SurrealDB, load current ACS, and stream from ledger end
-indexer-fresh:
+# Fresh start: delete the synced data in SurrealDB, load current ACS, and stream from ledger end
+sync-fresh:
     {{secrets_runner}} \
-      cargo run --release -p event-graph-indexer -- sync --use-keycloak --fresh 2>&1 | tee sync.log
+      cargo run --release -p canton-event-graph-sync -- sync --use-keycloak --fresh 2>&1 | tee sync.log
 
-# Run indexer against local sandbox (no Keycloak, fake JWT)
-indexer-sandbox:
+# Run the sync against local sandbox (no Keycloak, fake JWT)
+sync-sandbox:
     {{secrets_runner}} \
-      cargo run --release -p event-graph-indexer -- sync --profile local 2>&1 | tee sync.log
+      cargo run --release -p canton-event-graph-sync -- sync --profile local 2>&1 | tee sync.log
 
 # Fresh start against local sandbox (no Keycloak)
-indexer-sandbox-fresh:
+sync-sandbox-fresh:
     {{secrets_runner}} \
-      cargo run --release -p event-graph-indexer -- sync --profile local --fresh 2>&1 | tee sync.log
+      cargo run --release -p canton-event-graph-sync -- sync --profile local --fresh 2>&1 | tee sync.log
 
-# Stop indexer
-indexer-stop:
-    pkill -f event-graph-indexer || true
+# Stop the sync
+sync-stop:
+    pkill -f canton-event-graph-sync || true
 
 # Look up a single update (transaction) by its ID
 get-update update_id profile="mainnet":
     {{secrets_runner}} \
       cargo run -p client -- get-update-by-id --profile {{profile}} --update-id {{update_id}}
-
-# Generate Rust types from DAR file(s)
-# Usage: just codegen output.rs path/to/file.dar [path/to/other.dar ...]
-codegen output +dars:
-    cargo run -p codegen -- --dar {{dars}} -o {{output}}
 
 # --- Integration tests ---
 

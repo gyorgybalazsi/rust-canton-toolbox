@@ -10,8 +10,7 @@ locally so a push doesn't get rejected by the `main` ruleset. This mirrors
 `.github/workflows/ci.yml` step-for-step.
 
 ## Prerequisites
-- `protoc` on PATH (tonic/prost build scripts need it; `codegen/build.rs` also
-  downloads the matching DAML LF proto from GitHub releases on a clean build).
+- `protoc` on PATH (the tonic/prost build scripts need it).
   Install on macOS with `brew install protobuf`.
 - The Rust version is pinned by `rust-toolchain.toml` (currently 1.96.0), so a
   plain `cargo` already uses the same compiler/clippy as CI. Do **not** override
@@ -42,8 +41,8 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 `cargo test --no-run` **compiles** every test target but runs nothing. The
 integration tests in `test/` and `submit/` need a live DAML sandbox that isn't
 available in CI — run those manually via the `justfile` recipes (e.g.
-`just test-nested`) when needed. `event-graph-indexer`'s SurrealDB tests start
-their own throwaway `surreal` server: `cargo test -p event-graph-indexer`.
+`just test-nested`) when needed. `canton-event-graph-sync`'s SurrealDB tests start
+their own throwaway `surreal` server: `cargo test -p canton-event-graph-sync`.
 
 ## Done when
 All four commands exit 0 — the same condition the required CI check enforces, so

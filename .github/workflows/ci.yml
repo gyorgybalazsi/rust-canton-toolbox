@@ -21,8 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # tonic/prost build scripts need protoc; codegen's build.rs also downloads
-      # the matching DAML LF proto from GitHub releases at build time.
+      # tonic/prost build scripts need protoc.
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 

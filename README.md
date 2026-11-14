@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Rust workspace for interacting with Canton/Daml ledgers: streaming events, generating Rust types from Daml models, and syncing the ledger event graph into SurrealDB.
+A Rust workspace for interacting with Canton/Daml ledgers: streaming events, submitting commands with Rust types generated from Daml models, and syncing the ledger event graph into SurrealDB.
 
 Why Rust? Because it's not an officially supported client language, and building from scratch is the best way to understand the Ledger API and `.dalf` encoding.
 
@@ -10,7 +10,7 @@ Why Rust? Because it's not an officially supported client language, and building
 
 - **Daml SDK** `3.7.1+` (`dpm install 3.7.1`)
 - **[protoc](https://protobuf.dev/installation/)** (Protocol Buffer Compiler)
-- **[SurrealDB](https://surrealdb.com/install)** `4.x` server (for event-graph-indexer; the `surreal` program also runs its integration tests)
+- **[SurrealDB](https://surrealdb.com/install)** `4.x` server (for canton-event-graph-sync; the `surreal` program also runs its integration tests)
 - **[just](https://github.com/casey/just)** command runner (optional, for convenience recipes)
 
 Add protoc to rust-analyzer in `.vscode/settings.json`:
@@ -37,10 +37,10 @@ names used by the example configs (`SURREAL_PASSWORD`, `DEVNET_CLIENT_SECRET`,
 `MAINNET_CLIENT_SECRET`, ...).
 
 First, create your local config file (gitignored):
-`event-graph-indexer/config/config.toml`, starting from
-`event-graph-indexer/config/config.toml.example`. The SurrealDB connection
+`canton-event-graph-sync/config/config.toml`, starting from
+`canton-event-graph-sync/config/config.toml.example`. The SurrealDB connection
 settings can also come straight from `SURREAL_*` environment variables (see the
-[indexer README](event-graph-indexer/README.md#configuration)).
+[canton-event-graph-sync README](canton-event-graph-sync/README.md#configuration)).
 
 Then choose where the values come from.
 
@@ -90,13 +90,12 @@ and then runs the rest of the command, e.g.
 |-------|------|-------------|
 | **ledger-api** | lib | Generated Protobuf/gRPC bindings for the Daml Ledger API v2 |
 | **client** | bin/lib | CLI and library wrapping Ledger API operations (streaming, JWT, party management) |
-| **codegen** | bin | Generates Rust structs from DAR packages, mirroring Daml template payloads and choice records |
 | **daml-type-rep** | lib | Type representations for Daml values (built-in types, numeric scaling, template IDs) |
 | **derive-lapi-access** | proc-macro | Derive macro implementing the `LapiAccess` trait for gRPC type conversions |
-| **event-graph-indexer** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
+| **canton-event-graph-sync** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
 | **submit** | lib | Library for submitting Daml contracts and exercising choices via gRPC |
 | **sandbox-init** | bin | CLI tool to start a Daml sandbox and run initialization scripts from DAR files |
-| **test** | lib | Integration tests for the `LapiAccess` trait paired with Daml examples |
+| **test** | lib | Integration tests for the `LapiAccess` trait paired with Daml examples, using checked-in generated types in `test/generated/` |
 
 ### client CLI
 
@@ -114,7 +113,7 @@ cargo run -p client -- <subcommand> <params>
 
 Run `cargo run -p client -- <subcommand> --help` for parameter details.
 
-### event-graph-indexer
+### canton-event-graph-sync
 
 Streams the Canton event graph into a SurrealDB server with:
 - Resilient sync with automatic reconnection and backoff, for both the ledger and the database
@@ -124,20 +123,18 @@ Streams the Canton event graph into a SurrealDB server with:
 - Configurable batching, flush timeouts, and idle detection
 - Multi-profile config support (local, devnet, mainnet)
 
-Configuration goes in `event-graph-indexer/config/config.toml` (gitignored).
-See the [indexer README](event-graph-indexer/README.md) for the data model.
+Configuration goes in `canton-event-graph-sync/config/config.toml` (gitignored).
+See the [canton-event-graph-sync README](canton-event-graph-sync/README.md) for the data model.
 
 See also: [A Daml ledger tells a story](https://discuss.daml.com/t/blog-post-a-daml-ledger-tells-a-story-it-s-time-to-show-it-to-everyone/6734).
 
-### codegen
+### Generating Rust types from DARs
 
-Generates Rust structs from DAR packages:
-
-```
-just codegen output.rs path/to/file.dar
-```
-
-Supports nested structs, modules, variants, enums, type aliases, and generics.
+The DAR-to-Rust code generator lives in its own repository,
+[daml-rust-codegen](https://github.com/gyorgybalazsi/daml-rust-codegen). It produces structs that use this
+workspace's `daml-type-rep`, `derive-lapi-access`, and `ledger-api` crates.
+The output for the example DARs used by the `test` crate is checked in under
+`test/generated/`; regenerate it with that tool when the Daml examples change.
 
 ## Running
 
@@ -145,12 +142,11 @@ Common tasks are available as `just` recipes:
 
 ```
 just                              # list all recipes
-just indexer-run                  # sync with Keycloak auth (release mode)
-just indexer-fresh                # fresh start: clear indexer data + reload ACS
-just indexer-sandbox              # sync against local sandbox (fake JWT)
-just indexer-sandbox-fresh        # fresh start against local sandbox
-just indexer-stop                 # stop the indexer process
-just codegen out.rs file.dar      # generate Rust types from a DAR
+just sync-run                  # sync with Keycloak auth (release mode)
+just sync-fresh                # fresh start: clear synced data + reload ACS
+just sync-sandbox              # sync against local sandbox (fake JWT)
+just sync-sandbox-fresh        # fresh start against local sandbox
+just sync-stop                 # stop the sync process
 just test-nested                  # run nested-test integration test
 just sandbox-init-ticketoffer     # init sandbox with ticketoffer example
 ```

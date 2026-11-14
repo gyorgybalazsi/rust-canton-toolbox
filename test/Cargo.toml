@@ -9,7 +9,6 @@ client = { path = "../client" }
 ledger-api = { path = "../ledger-api" }
 daml-type-rep = { path = "../daml-type-rep" }
 derive-lapi-access = { path = "../derive-lapi-access" }
-codegen = { path = "../codegen" }
 tokio = { workspace = true }
 tonic = { workspace = true }
 clap = { workspace = true }

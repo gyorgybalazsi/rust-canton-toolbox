@@ -9,10 +9,10 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use event_graph_indexer::config::{self, DbConfig};
-use event_graph_indexer::model::{self, WriteBatch};
-use event_graph_indexer::store::Store;
-use event_graph_indexer::writer::{StreamSettings, apply_batch_stream};
+use canton_event_graph_sync::config::{self, DbConfig};
+use canton_event_graph_sync::model::{self, WriteBatch};
+use canton_event_graph_sync::store::Store;
+use canton_event_graph_sync::writer::{StreamSettings, apply_batch_stream};
 use ledger_api::v2::{
     CreatedEvent, Event, ExercisedEvent, GetUpdatesResponse, Identifier, OffsetCheckpoint, Record,
     RecordField, Transaction, Value as DamlValue, event, get_updates_response::Update, value::Sum,

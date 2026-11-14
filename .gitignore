@@ -3,7 +3,7 @@
 **/.daml
 **/log
 .venv
-event-graph-indexer/config/config.toml
+canton-event-graph-sync/config/config.toml
 # Local secret wiring; commit only the .example template.
 secrets.env.1password
 .env
