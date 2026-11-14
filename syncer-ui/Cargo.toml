@@ -1,0 +1,16 @@
+[package]
+name = "syncer-ui"
+version = "0.1.0"
+edition = "2024"
+description = "Optional desktop window for starting and stopping the syncer"
+
+[dependencies]
+# Only for reading config.toml the same way the syncer does; the sync itself
+# runs as a separate `syncer` process.
+syncer = { path = "../syncer" }
+iced = { version = "0.14", features = ["tokio"] }
+tokio = { workspace = true }
+dotenvy = "0.15"
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }

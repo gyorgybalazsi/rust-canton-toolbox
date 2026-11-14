@@ -24,6 +24,7 @@ the point is to understand the Ledger API and `.dalf` encoding from scratch.
 | `sandbox-init` | Starts a Daml sandbox, uploads DARs, runs an init script. |
 | `test` (`daml-model-rep-examples`) | Hand-written **integration** examples that exercise generated types against a live sandbox. The generated types are checked in under `test/generated/`; they come from the standalone code generator at https://github.com/gyorgybalazsi/daml-rust-codegen. |
 | `syncer` | CLI that syncs ACS/updates into a SurrealDB server (Keycloak auth, 1Password). |
+| `syncer-ui` | Optional iced desktop window that starts/stops the `syncer` program as a child process and shows its log. Not in `default-members`, so a plain `cargo build` skips it; `--workspace` (and CI) still builds it. |
 | `wallet` | Placeholder crate (stub). |
 
 ## Build quirks (read before touching the build)
