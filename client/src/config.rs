@@ -44,13 +44,13 @@ pub fn read_config<P: AsRef<Path>>(path: P, profile: Option<&str>) -> Result<Con
 ///
 /// Lookup order:
 /// 1. `./config/config.toml` (relative to cwd)
-/// 2. `./canton-event-graph-sync/config/config.toml` (repo root fallback)
+/// 2. `./syncer/config/config.toml` (repo root fallback)
 /// 3. `CARGO_MANIFEST_DIR/config/config.toml` (for `cargo run`)
 pub fn read_config_from_toml(profile: Option<&str>) -> Result<Config> {
     let candidates = [
         Some(std::path::PathBuf::from("config").join("config.toml")),
         Some(
-            std::path::PathBuf::from("canton-event-graph-sync")
+            std::path::PathBuf::from("syncer")
                 .join("config")
                 .join("config.toml"),
         ),
@@ -69,7 +69,7 @@ pub fn read_config_from_toml(profile: Option<&str>) -> Result<Config> {
 
     anyhow::bail!(
         "Could not find config.toml. Searched: ./config/config.toml, \
-         ./canton-event-graph-sync/config/config.toml, CARGO_MANIFEST_DIR/config/config.toml. \
+         ./syncer/config/config.toml, CARGO_MANIFEST_DIR/config/config.toml. \
          Use --config-file to specify a path."
     )
 }

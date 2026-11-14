@@ -1,5 +1,5 @@
 [package]
-name = "canton-event-graph-sync"
+name = "syncer"
 version = "0.1.0"
 edition = "2024"
 

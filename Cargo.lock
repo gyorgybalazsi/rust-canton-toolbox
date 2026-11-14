@@ -387,33 +387,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "canton-event-graph-sync"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "client",
- "futures-util",
- "ledger-api",
- "prost-types",
- "prost-wkt",
- "prost-wkt-types",
- "regex",
- "rust_decimal",
- "serde",
- "serde_json",
- "surrealdb",
- "tokio",
- "tokio-stream",
- "toml",
- "tonic 0.13.1",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "castaway"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3469,6 +3442,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 dependencies = [
  "futures-core",
+]
+
+[[package]]
+name = "syncer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "client",
+ "futures-util",
+ "ledger-api",
+ "prost-types",
+ "prost-wkt",
+ "prost-wkt-types",
+ "regex",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "tokio",
+ "tokio-stream",
+ "toml",
+ "tonic 0.13.1",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

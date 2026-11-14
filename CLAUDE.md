@@ -23,7 +23,7 @@ the point is to understand the Ledger API and `.dalf` encoding from scratch.
 | `submit` | Command submission helpers (`create_contract`, `exercise_choice`). |
 | `sandbox-init` | Starts a Daml sandbox, uploads DARs, runs an init script. |
 | `test` (`daml-model-rep-examples`) | Hand-written **integration** examples that exercise generated types against a live sandbox. The generated types are checked in under `test/generated/`; they come from the standalone code generator at https://github.com/gyorgybalazsi/daml-rust-codegen. |
-| `canton-event-graph-sync` | CLI that syncs ACS/updates into a SurrealDB server (Keycloak auth, 1Password). |
+| `syncer` | CLI that syncs ACS/updates into a SurrealDB server (Keycloak auth, 1Password). |
 | `wallet` | Placeholder crate (stub). |
 
 ## Build quirks (read before touching the build)
@@ -55,9 +55,9 @@ commented `#[allow(...)]` (see `ledger-api/src/lib.rs`, `test/src/lib.rs`).
 
 `cargo test --no-run` only **compiles** tests. The integration tests in `test/`
 and `submit/` need a live Daml sandbox (and DARs built with `dpm`), so they are
-not run in CI. `canton-event-graph-sync/tests/surreal_integration.rs` starts its own
+not run in CI. `syncer/tests/surreal_integration.rs` starts its own
 throwaway in-memory server with the `surreal` program and skips itself when that
-isn't installed: run it with `cargo test -p canton-event-graph-sync`. Run the
+isn't installed: run it with `cargo test -p syncer`. Run the
 sandbox ones manually via the `justfile` (e.g. `just test-nested`, `just sandbox-init-*`).
 See `justfile` for all recipes.
 
@@ -81,4 +81,4 @@ the `/rust-ci` skill before pushing to avoid a red CI.
   are gitignored.
 - Local-only files (gitignored): `CLAUDE.local.md`, `.claude/` (except the
   shared `.claude/settings.json` and `.claude/skills/`),
-  `canton-event-graph-sync/config/config.toml`, `secrets.env.1password`, `.env`.
+  `syncer/config/config.toml`, `secrets.env.1password`, `.env`.

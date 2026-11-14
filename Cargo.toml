@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     "client", 
-    "canton-event-graph-sync",
+    "syncer",
     "ledger-api",
     "daml-type-rep",
     "derive-lapi-access",

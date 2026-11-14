@@ -1,6 +1,6 @@
 ---
 name: rust-ci
-description: Run the canton-toolbox CI gate locally before pushing — cargo fmt --check, build, test --no-run, and clippy -D warnings under the pinned Rust toolchain. Use when asked to pre-flight CI, check a Rust change before pushing/opening a PR, or reproduce the required "build / test / clippy / fmt" check. Mirrors .github/workflows/ci.yml exactly.
+description: Run the canton-event-graph-syncer CI gate locally before pushing — cargo fmt --check, build, test --no-run, and clippy -D warnings under the pinned Rust toolchain. Use when asked to pre-flight CI, check a Rust change before pushing/opening a PR, or reproduce the required "build / test / clippy / fmt" check. Mirrors .github/workflows/ci.yml exactly.
 ---
 
 # Rust CI gate (local pre-flight)
@@ -41,8 +41,8 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 `cargo test --no-run` **compiles** every test target but runs nothing. The
 integration tests in `test/` and `submit/` need a live DAML sandbox that isn't
 available in CI — run those manually via the `justfile` recipes (e.g.
-`just test-nested`) when needed. `canton-event-graph-sync`'s SurrealDB tests start
-their own throwaway `surreal` server: `cargo test -p canton-event-graph-sync`.
+`just test-nested`) when needed. `syncer`'s SurrealDB tests start
+their own throwaway `surreal` server: `cargo test -p syncer`.
 
 ## Done when
 All four commands exit 0 — the same condition the required CI check enforces, so

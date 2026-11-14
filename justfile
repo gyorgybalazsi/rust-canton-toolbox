@@ -16,26 +16,26 @@ default:
 # Run the sync with Keycloak authentication (release mode)
 sync-run:
     {{secrets_runner}} \
-      cargo run --release -p canton-event-graph-sync -- sync --use-keycloak 2>&1 | tee sync.log
+      cargo run --release -p syncer -- sync --use-keycloak 2>&1 | tee sync.log
 
 # Fresh start: delete the synced data in SurrealDB, load current ACS, and stream from ledger end
 sync-fresh:
     {{secrets_runner}} \
-      cargo run --release -p canton-event-graph-sync -- sync --use-keycloak --fresh 2>&1 | tee sync.log
+      cargo run --release -p syncer -- sync --use-keycloak --fresh 2>&1 | tee sync.log
 
 # Run the sync against local sandbox (no Keycloak, fake JWT)
 sync-sandbox:
     {{secrets_runner}} \
-      cargo run --release -p canton-event-graph-sync -- sync --profile local 2>&1 | tee sync.log
+      cargo run --release -p syncer -- sync --profile local 2>&1 | tee sync.log
 
 # Fresh start against local sandbox (no Keycloak)
 sync-sandbox-fresh:
     {{secrets_runner}} \
-      cargo run --release -p canton-event-graph-sync -- sync --profile local --fresh 2>&1 | tee sync.log
+      cargo run --release -p syncer -- sync --profile local --fresh 2>&1 | tee sync.log
 
 # Stop the sync
 sync-stop:
-    pkill -f canton-event-graph-sync || true
+    pkill -f syncer || true
 
 # Look up a single update (transaction) by its ID
 get-update update_id profile="mainnet":

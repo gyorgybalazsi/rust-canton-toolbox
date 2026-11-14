@@ -1,4 +1,4 @@
-# Client Toolbox for Canton
+# canton-event-graph-syncer
 
 ## Overview
 
@@ -10,7 +10,7 @@ Why Rust? Because it's not an officially supported client language, and building
 
 - **Daml SDK** `3.7.1+` (`dpm install 3.7.1`)
 - **[protoc](https://protobuf.dev/installation/)** (Protocol Buffer Compiler)
-- **[SurrealDB](https://surrealdb.com/install)** `4.x` server (for canton-event-graph-sync; the `surreal` program also runs its integration tests)
+- **[SurrealDB](https://surrealdb.com/install)** `4.x` server (for syncer; the `surreal` program also runs its integration tests)
 - **[just](https://github.com/casey/just)** command runner (optional, for convenience recipes)
 
 Add protoc to rust-analyzer in `.vscode/settings.json`:
@@ -37,10 +37,10 @@ names used by the example configs (`SURREAL_PASSWORD`, `DEVNET_CLIENT_SECRET`,
 `MAINNET_CLIENT_SECRET`, ...).
 
 First, create your local config file (gitignored):
-`canton-event-graph-sync/config/config.toml`, starting from
-`canton-event-graph-sync/config/config.toml.example`. The SurrealDB connection
+`syncer/config/config.toml`, starting from
+`syncer/config/config.toml.example`. The SurrealDB connection
 settings can also come straight from `SURREAL_*` environment variables (see the
-[canton-event-graph-sync README](canton-event-graph-sync/README.md#configuration)).
+[syncer README](syncer/README.md#configuration)).
 
 Then choose where the values come from.
 
@@ -92,7 +92,7 @@ and then runs the rest of the command, e.g.
 | **client** | bin/lib | CLI and library wrapping Ledger API operations (streaming, JWT, party management) |
 | **daml-type-rep** | lib | Type representations for Daml values (built-in types, numeric scaling, template IDs) |
 | **derive-lapi-access** | proc-macro | Derive macro implementing the `LapiAccess` trait for gRPC type conversions |
-| **canton-event-graph-sync** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
+| **syncer** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
 | **submit** | lib | Library for submitting Daml contracts and exercising choices via gRPC |
 | **sandbox-init** | bin | CLI tool to start a Daml sandbox and run initialization scripts from DAR files |
 | **test** | lib | Integration tests for the `LapiAccess` trait paired with Daml examples, using checked-in generated types in `test/generated/` |
@@ -113,7 +113,7 @@ cargo run -p client -- <subcommand> <params>
 
 Run `cargo run -p client -- <subcommand> --help` for parameter details.
 
-### canton-event-graph-sync
+### syncer
 
 Streams the Canton event graph into a SurrealDB server with:
 - Resilient sync with automatic reconnection and backoff, for both the ledger and the database
@@ -123,8 +123,8 @@ Streams the Canton event graph into a SurrealDB server with:
 - Configurable batching, flush timeouts, and idle detection
 - Multi-profile config support (local, devnet, mainnet)
 
-Configuration goes in `canton-event-graph-sync/config/config.toml` (gitignored).
-See the [canton-event-graph-sync README](canton-event-graph-sync/README.md) for the data model.
+Configuration goes in `syncer/config/config.toml` (gitignored).
+See the [syncer README](syncer/README.md) for the data model.
 
 See also: [A Daml ledger tells a story](https://discuss.daml.com/t/blog-post-a-daml-ledger-tells-a-story-it-s-time-to-show-it-to-everyone/6734).
 

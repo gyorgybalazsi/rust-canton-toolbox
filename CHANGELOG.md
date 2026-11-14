@@ -12,10 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `test/generated/`, and `client` no longer depends on it (it never used it).
 
 ### Changed
-- Renamed crate, folder and binary `event-graph-indexer` → `canton-event-graph-sync`,
-  and its justfile recipes `indexer-*` → `sync-*` (`sync-run`, `sync-fresh`,
+- Repository renamed `rust-canton-toolbox` → `canton-event-graph-syncer`
+- Renamed crate, folder and binary `event-graph-indexer` → `syncer`, and its
+  justfile recipes `indexer-*` → `sync-*` (`sync-run`, `sync-fresh`,
   `sync-sandbox`, `sync-sandbox-fresh`, `sync-stop`). Its local config now lives in
-  `canton-event-graph-sync/config/config.toml`.
+  `syncer/config/config.toml`.
 - Daml examples in `_daml/` and codegen's Daml-LF protos moved to SDK 3.7.1
   (`daml-nested-test` was on 3.4.11, the rest on 3.4.8)
 - Vendored Ledger API v2 protos bumped from Canton 3.6.1 to 3.7.1 (adds
@@ -24,13 +25,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ACS readers (`active_contracts`, `get_blob`) set
   `include_incomplete_reassignments = true` so incomplete (un)assigned entries
   are still returned, as before 3.7
-- `event-graph-indexer` (now `canton-event-graph-sync`) writes to a SurrealDB 4 server instead of Neo4j.
+- `event-graph-indexer` (now `syncer`) writes to a SurrealDB 4 server instead of Neo4j.
   Neo4j labels became tables (`transaction`, `created`, `exercised`, `party`,
   `sync_state`) and relationship types became relation tables (`action`,
   `consequence`, `target`, `consumes`, `requested`). Contract and choice
   arguments are stored as nested objects instead of flattened properties or
   JSON strings; party lists and result contract ids are arrays; timestamps are
-  datetimes. See `canton-event-graph-sync/README.md`.
+  datetimes. See `syncer/README.md`.
 - Config: the `[neo4j]` section is replaced by `[surrealdb]`
   (`url`, `namespace`, `database`, `username`, `password`), each overridable
   with a `SURREAL_*` environment variable. The indexer signs in as a database

@@ -1,4 +1,4 @@
-# canton-event-graph-sync
+# syncer
 
 Streams Daml/Canton ledger data into a [SurrealDB](https://surrealdb.com) server
 as a graph: transactions, created contracts, exercised choices and parties,
@@ -119,7 +119,7 @@ You can connect to:
 ## Installation
 
 ```bash
-cargo build --release -p canton-event-graph-sync
+cargo build --release -p syncer
 ```
 
 ## Configuration
@@ -158,13 +158,13 @@ Continuously syncs ledger updates to SurrealDB with automatic reconnection.
 
 ```bash
 # Normal sync (resumes from the last offset in the database)
-cargo run --release -p canton-event-graph-sync -- sync --use-keycloak
+cargo run --release -p syncer -- sync --use-keycloak
 
 # Fresh start (deletes the indexer data, loads current ACS, streams from ledger end)
-cargo run --release -p canton-event-graph-sync -- sync --use-keycloak --fresh
+cargo run --release -p syncer -- sync --use-keycloak --fresh
 
 # Fresh start from ~7 days ago (resolves the offset via the Ledger API, implies --fresh)
-cargo run --release -p canton-event-graph-sync -- sync --use-keycloak --from-days-ago 7
+cargo run --release -p syncer -- sync --use-keycloak --from-days-ago 7
 ```
 
 Options:
@@ -183,7 +183,7 @@ tables and indexes stay defined, and nothing else in the database is touched.
 Measures Canton stream throughput without writing to the database.
 
 ```bash
-cargo run --release -p canton-event-graph-sync -- benchmark --use-keycloak --count 10000
+cargo run --release -p syncer -- benchmark --use-keycloak --count 10000
 ```
 
 ### print-surql
@@ -191,7 +191,7 @@ cargo run --release -p canton-event-graph-sync -- benchmark --use-keycloak --cou
 Prints the SurrealQL writes generated for each update (no database needed).
 
 ```bash
-cargo run --release -p canton-event-graph-sync -- print-surql \
+cargo run --release -p syncer -- print-surql \
   --access-token <token> \
   --party <party-id> \
   --url <ledger-url> \
@@ -228,7 +228,7 @@ WHERE count(<-consumes) = 0 GROUP BY template_name;
 ## Tests
 
 ```bash
-cargo test -p canton-event-graph-sync
+cargo test -p syncer
 ```
 
 The integration tests in `tests/surreal_integration.rs` start a throwaway
@@ -240,8 +240,8 @@ they never touch real data. They need the `surreal` program on the `PATH` (or
 
 ```
 ┌─────────────────┐    ┌──────────────┐    ┌──────────────┐
-│  Canton Ledger  │───▶│ canton-event │───▶│  SurrealDB   │◀── graph viewer,
-│  (gRPC Stream)  │    │ -graph-sync  │ ws │  server      │    SurrealDB Studio
+│  Canton Ledger  │───▶│   syncer     │───▶│  SurrealDB   │◀── graph viewer,
+│  (gRPC Stream)  │    │              │ ws │  server      │    SurrealDB Studio
 └─────────────────┘    └──────────────┘    └──────────────┘
         │                     │
         │                     ▼
