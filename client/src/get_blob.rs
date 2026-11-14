@@ -57,6 +57,7 @@ pub async fn get_blobs_by_template(
         active_at_offset,
         event_format: Some(event_format),
         stream_continuation_token: None,
+        include_incomplete_reassignments: false,
     };
     debug!("Created GetActiveContractsRequest: {:?}", request);
 

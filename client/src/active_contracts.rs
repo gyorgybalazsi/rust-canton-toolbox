@@ -64,6 +64,7 @@ pub async fn stream_active_contracts(
         active_at_offset,
         event_format: Some(event_format),
         stream_continuation_token: continuation_token,
+        include_incomplete_reassignments: false,
     };
     debug!("Created GetActiveContractsRequest: {:?}", request);
 
