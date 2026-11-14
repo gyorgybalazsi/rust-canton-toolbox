@@ -56,7 +56,7 @@ build-dars:
 # Run the sandbox integration tests (test, client, submit). They share the
 # sandbox ports 6865-6869, so they run one at a time.
 test-sandbox: build-dars
-    cargo test -p daml-model-rep-examples -p client -p submit -- --test-threads=1
+    cargo test --no-fail-fast -p daml-model-rep-examples -p client -p submit -- --test-threads=1
 
 # Run the nested-test integration test (starts sandbox, creates contract, exercises choice)
 test-nested:
