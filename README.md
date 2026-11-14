@@ -8,9 +8,7 @@ nested objects you can query by path. It loads the Active Contract Set first,
 follows the ledger in real time, and resumes from the last stored offset.
 
 The workspace also holds the Rust Ledger API client libraries the syncer is
-built on. Why Rust? Because it's not an officially supported client language,
-and building from scratch is the best way to understand the Ledger API and
-`.dalf` encoding.
+built on.
 
 See also: [A Daml ledger tells a story](https://discuss.daml.com/t/blog-post-a-daml-ledger-tells-a-story-it-s-time-to-show-it-to-everyone/6734).
 
