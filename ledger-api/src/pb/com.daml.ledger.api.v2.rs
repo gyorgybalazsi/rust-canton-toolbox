@@ -859,8 +859,8 @@ pub struct InterfaceFilter {
     /// The interface that a matching contract must implement.
     /// The ``interface_id`` needs to be valid: corresponding interface should be defined in
     /// one of the available packages at the time of the query.
-    /// Both package-name and package-id reference formats for the identifier are supported.
-    /// Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+    /// Only package-name reference format for the identifier is supported.
+    /// Note: The package-id reference identifier format was removed in version 3.5.
     ///
     /// Required
     #[prost(message, optional, tag = "1")]
@@ -885,8 +885,8 @@ pub struct TemplateFilter {
     /// A template for which the payload should be included in the response.
     /// The ``template_id`` needs to be valid: corresponding template should be defined in
     /// one of the available packages at the time of the query.
-    /// Both package-name and package-id reference formats for the identifier are supported.
-    /// Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+    /// Only package-name reference format for the identifier is supported.
+    /// Note: The package-id reference identifier format was removed in version 3.5.
     ///
     /// Required
     #[prost(message, optional, tag = "1")]
@@ -990,6 +990,17 @@ pub struct UpdateFormat {
     /// Optional
     #[prost(message, optional, tag = "3")]
     pub include_topology_events: ::core::option::Option<TopologyFormat>,
+    /// Include both Daml transactions and (un)assignments in streams.
+    /// Shorthand for setting include_transactions to this format and include_reassignments
+    /// to its event_format.
+    /// The (un)assignments in the result take the shape TRANSACTION_SHAPE_ACS_DELTA.
+    /// If set, include_transactions and include_reassignments must be unset.
+    ///
+    /// Optional
+    #[prost(message, optional, tag = "4")]
+    pub include_transactions_and_reassignments: ::core::option::Option<
+        TransactionFormat,
+    >,
 }
 /// Event shape for Transactions.
 /// Shapes are exclusive and only one of them can be defined in queries.
@@ -1916,7 +1927,8 @@ pub struct UnassignedEvent {
     pub reassignment_counter: u64,
     /// Assignment exclusivity
     /// Before this time (measured on the target synchronizer), only the submitter of the unassignment can initiate the assignment
-    /// Defined for reassigning participants.
+    /// Defined for reassigning participants, up to protocol version 36.
+    /// Starting with protocol version 37, it is not set: any stakeholder can submit the assignment as soon as the unassignment is completed.
     ///
     /// Optional
     #[prost(message, optional, tag = "8")]
@@ -2018,7 +2030,8 @@ pub struct GetActiveContractsRequest {
     ///
     /// - subsequent request must be executed on the same participant with the same version of canton,
     /// - subsequent request must have the same active_at_offset,
-    /// - subsequent request must have the same event_format
+    /// - subsequent request must have the same event_format,
+    /// - subsequent request must have the same include_incomplete_reassignments
     /// - and the participant must not have been pruned after the active_at_offset.
     ///
     /// If not specified, the whole active contracts snapshot will be returned.
@@ -2026,6 +2039,13 @@ pub struct GetActiveContractsRequest {
     /// Optional: can be empty
     #[prost(bytes = "vec", optional, tag = "5")]
     pub stream_continuation_token: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
+    /// If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+    /// based on the specified event_format.
+    /// If this flag is set to false, Incomplete Reassignments will be omitted.
+    ///
+    /// Optional
+    #[prost(bool, tag = "6")]
+    pub include_incomplete_reassignments: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetActiveContractsPageRequest {
@@ -2057,7 +2077,7 @@ pub struct GetActiveContractsPageRequest {
     /// The page token only works if subsequent requests:
     ///
     /// - are executed on the same participant,
-    /// - use the same active_at_offset and event_format,
+    /// - use the same active_at_offset, event_format and include_incomplete_reassignments,
     /// - and the participant's store was not pruned to after the active_at_offset.
     ///
     /// If not specified, the first page of the active contracts snapshot will be returned.
@@ -2065,6 +2085,13 @@ pub struct GetActiveContractsPageRequest {
     /// Optional: can be empty
     #[prost(bytes = "vec", optional, tag = "4")]
     pub page_token: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
+    /// If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+    /// based on the specified event_format.
+    /// If this flag is set to false, Incomplete Reassignments will be omitted.
+    ///
+    /// Optional
+    #[prost(bool, tag = "5")]
+    pub include_incomplete_reassignments: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetActiveContractsResponse {
@@ -3338,6 +3365,13 @@ pub struct ReassignmentCommands {
     /// Required: must be non-empty
     #[prost(message, repeated, tag = "6")]
     pub commands: ::prost::alloc::vec::Vec<ReassignmentCommand>,
+    /// The account to charge for this reassignment when traffic accounting is enabled.
+    /// Uses the same format and required rights as ``Commands.account_id``.
+    /// If empty, the participant charges the submitter's account.
+    ///
+    /// Optional
+    #[prost(string, tag = "7")]
+    pub account_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReassignmentCommand {
@@ -3377,6 +3411,21 @@ pub struct UnassignCommand {
     /// Required
     #[prost(string, tag = "3")]
     pub target: ::prost::alloc::string::String,
+    /// The package id used to validate the contract on the source synchronizer.
+    ///
+    /// Optional
+    #[prost(string, optional, tag = "4")]
+    pub override_source_validation_package_id: ::core::option::Option<
+        ::prost::alloc::string::String,
+    >,
+    /// The package id used to validate the contract on the target synchronizer. This
+    /// package id will also become the representative package id used in the created event.
+    ///
+    /// Optional
+    #[prost(string, optional, tag = "5")]
+    pub override_target_validation_package_id: ::core::option::Option<
+        ::prost::alloc::string::String,
+    >,
 }
 /// Assign a contract
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -4105,6 +4154,18 @@ pub struct Commands {
     /// Optional
     #[prost(uint32, optional, tag = "16")]
     pub taps_max_passes: ::core::option::Option<u32>,
+    /// The account to charge for this submission when traffic accounting is enabled.
+    /// Must have one or more non-empty segments separated by ``/``, with at most 255 characters total.
+    /// Segments allow UserIdString characters plus spaces, so every valid party id is also valid.
+    /// If empty, use the only acting party's account. With multiple acting parties, charge no account
+    /// or reject the submission, depending on the participant configuration.
+    /// With Ledger API authorization enabled, the user needs ``CanDebitTrafficFrom(account_id)``,
+    /// ``CanDebitTrafficFromAnyAccount``, or an act-as or execute-as right for a party with the same id.
+    /// ``CanActAsAnyParty`` and ``CanExecuteAsAnyParty`` allow any account, even if it isn't a party.
+    ///
+    /// Optional
+    #[prost(string, tag = "17")]
+    pub account_id: ::prost::alloc::string::String,
     /// Specifies the deduplication period for the change ID.
     /// If omitted, the participant will assume the configured maximum deduplication time.
     ///

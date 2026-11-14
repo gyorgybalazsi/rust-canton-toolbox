@@ -57,7 +57,9 @@ pub async fn get_blobs_by_template(
         active_at_offset,
         event_format: Some(event_format),
         stream_continuation_token: None,
-        include_incomplete_reassignments: false,
+        // Keep returning IncompleteUnassigned/IncompleteAssigned entries (handled below);
+        // since Canton 3.7 they are omitted unless this flag is set.
+        include_incomplete_reassignments: true,
     };
     debug!("Created GetActiveContractsRequest: {:?}", request);
 

@@ -103,7 +103,7 @@ pub struct User {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Right {
     /// Required
-    #[prost(oneof = "right::Kind", tags = "1, 2, 3, 4, 5, 6, 7, 8")]
+    #[prost(oneof = "right::Kind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
     pub kind: ::core::option::Option<right::Kind>,
 }
 /// Nested message and enum types in `Right`.
@@ -157,6 +157,20 @@ pub mod right {
     /// Its utility is predominantly for users that act on behalf of many parties.
     #[derive(Clone, Copy, PartialEq, ::prost::Message)]
     pub struct CanActAsAnyParty {}
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct CanDebitTrafficFrom {
+        /// The right to debit traffic from this local traffic account.
+        ///
+        /// An account id is one or more non-empty segments joined by "/", at most 255 characters in total.
+        /// Segment characters are ASCII letters, digits, space, and any of @ ^ $ . ! ` - # + ' ~ _ | : ( )
+        ///
+        /// Required
+        #[prost(string, tag = "1")]
+        pub account_id: ::prost::alloc::string::String,
+    }
+    /// The right of a user to debit traffic from any account.
+    #[derive(Clone, Copy, PartialEq, ::prost::Message)]
+    pub struct CanDebitTrafficFromAnyAccount {}
     /// Required
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Kind {
@@ -184,6 +198,12 @@ pub mod right {
         /// The user can act as any party on a participant.
         #[prost(message, tag = "8")]
         CanActAsAnyParty(CanActAsAnyParty),
+        /// The user can debit traffic from a specific account.
+        #[prost(message, tag = "9")]
+        CanDebitTrafficFrom(CanDebitTrafficFrom),
+        /// The user can debit traffic from any account.
+        #[prost(message, tag = "10")]
+        CanDebitTrafficFromAnyAccount(CanDebitTrafficFromAnyAccount),
     }
 }
 /// Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(user.identity_provider_id)``
@@ -1899,6 +1919,15 @@ pub struct GenerateExternalPartyTopologyRequest {
     pub observing_participant_uids: ::prost::alloc::vec::Vec<
         ::prost::alloc::string::String,
     >,
+    /// The protocol version to create the topology transactions for, so that clients that only read topology
+    /// transactions of an older protocol version can read them, e.g. 36 on a synchronizer with protocol version 37.
+    /// Must be the synchronizer's protocol version or a lower one whose topology transactions the synchronizer admits:
+    /// from protocol version 37 on, a synchronizer admits those of protocol version 36.
+    /// Defaults to the synchronizer's protocol version.
+    ///
+    /// Optional
+    #[prost(uint32, optional, tag = "8")]
+    pub protocol_version: ::core::option::Option<u32>,
 }
 /// Response message with topology transactions and the multi-hash to be signed.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1915,8 +1944,8 @@ pub struct GenerateExternalPartyTopologyResponse {
     pub public_key_fingerprint: ::prost::alloc::string::String,
     /// The serialized topology transactions which need to be signed and submitted as part of the allocate party process
     /// Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
-    /// as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
-    /// supported by the synchronizer.
+    /// as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` for the requested
+    /// protocol version, or for the synchronizer's protocol version if none is requested.
     ///
     /// Required: must be non-empty
     #[prost(bytes = "vec", repeated, tag = "3")]
