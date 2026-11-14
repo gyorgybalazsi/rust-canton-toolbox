@@ -1,17 +1,17 @@
 use clap::{Parser, Subcommand};
 use client::jwt::TokenSource;
 use client::stream_updates::stream_updates;
-use event_graph_indexer::config;
-use event_graph_indexer::model;
-use event_graph_indexer::sync::{BackoffConfig, SyncConfig, run_resilient_sync};
 use ledger_api::v2::Identifier;
 use std::time::Instant;
+use syncer::config;
+use syncer::model;
+use syncer::sync::{BackoffConfig, SyncConfig, run_resilient_sync};
 use tokio_stream::StreamExt;
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "event-graph-indexer")]
+#[command(name = "syncer")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -72,7 +72,7 @@ enum Commands {
         /// Use Keycloak to obtain a real JWT token (requires keycloak section in profile)
         #[arg(long)]
         use_keycloak: bool,
-        /// Fresh start: delete the indexer data in SurrealDB, load current ACS, and stream from ledger end
+        /// Fresh start: delete the synced data in SurrealDB, load current ACS, and stream from ledger end
         #[arg(long)]
         fresh: bool,
         /// Start a fresh sync from the offset that was current N days ago
@@ -94,10 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..
         } => {
             let config = match config_file {
-                Some(path) => {
-                    event_graph_indexer::config::read_config(path, profile.as_deref()).ok()
-                }
-                None => event_graph_indexer::config::read_config_from_toml(profile.as_deref()).ok(),
+                Some(path) => syncer::config::read_config(path, profile.as_deref()).ok(),
+                None => syncer::config::read_config_from_toml(profile.as_deref()).ok(),
             };
             config
                 .map(|c| c.logging.level)
@@ -167,9 +165,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Starting Canton stream benchmark (no database writes)");
 
             let config = match config_file {
-                Some(path) => event_graph_indexer::config::read_config(&path, profile.as_deref())
+                Some(path) => syncer::config::read_config(&path, profile.as_deref())
                     .expect("failed to read config"),
-                None => event_graph_indexer::config::read_config_from_toml(profile.as_deref())
+                None => syncer::config::read_config_from_toml(profile.as_deref())
                     .expect("failed to read config"),
             };
             let parties = config.ledger.parties.unwrap_or_default();
@@ -347,7 +345,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "  Conversion overhead: {:.1}%",
                 (1.0 - convert_rate / raw_rate) * 100.0
             );
-            info!("  (Compare with event-graph-indexer sync rate to see database write overhead)");
+            info!("  (Compare with syncer sync rate to see database write overhead)");
         }
         Commands::Sync {
             config_file,
@@ -366,9 +364,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             debug!(config_path = ?config_file, profile = ?profile, "Reading configuration from TOML file");
             let config = match config_file {
-                Some(path) => event_graph_indexer::config::read_config(&path, profile.as_deref())
+                Some(path) => syncer::config::read_config(&path, profile.as_deref())
                     .expect("failed to read config from specified path"),
-                None => event_graph_indexer::config::read_config_from_toml(profile.as_deref())
+                None => syncer::config::read_config_from_toml(profile.as_deref())
                     .expect("failed to read config from toml"),
             };
             let fake_jwt_user = config.ledger.fake_jwt_user;
@@ -407,7 +405,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         kc_config.token_endpoint
                     );
 
-                    // Convert from event-graph-indexer's KeycloakConfig to client's KeycloakConfig
+                    // Convert from syncer's KeycloakConfig to client's KeycloakConfig
                     let auth_method = match kc_config.auth_method {
                         config::KeycloakAuthMethod::ClientCredentials { client_secret } => {
                             client::jwt::KeycloakAuthMethod::ClientCredentials { client_secret }

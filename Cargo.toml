@@ -2,8 +2,7 @@
 resolver = "3"
 members = [
     "client", 
-    "codegen",
-    "event-graph-indexer",
+    "syncer",
     "ledger-api",
     "daml-type-rep",
     "derive-lapi-access",

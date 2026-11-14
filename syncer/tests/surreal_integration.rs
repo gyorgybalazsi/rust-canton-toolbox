@@ -9,10 +9,6 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use event_graph_indexer::config::{self, DbConfig};
-use event_graph_indexer::model::{self, WriteBatch};
-use event_graph_indexer::store::Store;
-use event_graph_indexer::writer::{StreamSettings, apply_batch_stream};
 use ledger_api::v2::{
     CreatedEvent, Event, ExercisedEvent, GetUpdatesResponse, Identifier, OffsetCheckpoint, Record,
     RecordField, Transaction, Value as DamlValue, event, get_updates_response::Update, value::Sum,
@@ -20,6 +16,10 @@ use ledger_api::v2::{
 use surrealdb::engine::any;
 use surrealdb::opt::auth::Root;
 use surrealdb::types::{Number, Value};
+use syncer::config::{self, DbConfig};
+use syncer::model::{self, WriteBatch};
+use syncer::store::Store;
+use syncer::writer::{StreamSettings, apply_batch_stream};
 
 const NS: &str = "test";
 const DB: &str = "test";

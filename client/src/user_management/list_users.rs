@@ -67,7 +67,8 @@ mod tests {
         let package_root = PathBuf::from(&crate_root)
             .join("..")
             .join("_daml")
-            .join("daml-asset");
+            .join("daml-asset")
+            .join("main");
         let dar_path = package_root
             .join(".daml")
             .join("dist")

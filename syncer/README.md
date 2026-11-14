@@ -1,17 +1,17 @@
-# Event Graph Indexer
+# syncer
 
 Streams Daml/Canton ledger data into a [SurrealDB](https://surrealdb.com) server
 as a graph: transactions, created contracts, exercised choices and parties,
 linked by relations. It follows the ledger in real time and resumes where it
 left off.
 
-The indexer is one client of the database among others (a graph viewer,
+The syncer is one client of the database among others (a graph viewer,
 SurrealDB Studio, ...). It connects over the network as a database user and
 never opens a database folder directly.
 
 ## Supported Daml SDK
 
-This app was tested with sdk-version 3.4.8. The ledger sync uses Ledger API v2.
+The Ledger API v2 bindings are built from the Canton 3.7.1 protos. The syncer was last tested end to end against SDK 3.4.8.
 
 ## Features
 
@@ -23,7 +23,7 @@ This app was tested with sdk-version 3.4.8. The ledger sync uses Ledger API v2.
   used later already exist
 - **JWT token management**: Keycloak OAuth2 (client credentials or password flow)
   with automatic token refresh
-- **Fresh start**: deletes the indexer's data and starts from the current ledger end
+- **Fresh start**: deletes the synced data and starts from the current ledger end
 - **Batched writes**: one database transaction per batch of updates, one
   statement per table
 
@@ -100,8 +100,8 @@ server, for example with on-disk storage:
 surreal start --user root --pass '<root password>' --bind 127.0.0.1:8000 surrealkv://data/event-graph
 ```
 
-As root, create the namespace, the database and the indexer's user once (the
-indexer itself never signs in as root):
+As root, create the namespace, the database and the syncer's user once (the
+syncer itself never signs in as root):
 
 ```sql
 DEFINE NAMESPACE canton; USE NS canton;
@@ -119,7 +119,7 @@ You can connect to:
 ## Installation
 
 ```bash
-cargo build --release -p event-graph-indexer
+cargo build --release -p syncer
 ```
 
 ## Configuration
@@ -158,13 +158,13 @@ Continuously syncs ledger updates to SurrealDB with automatic reconnection.
 
 ```bash
 # Normal sync (resumes from the last offset in the database)
-cargo run --release -p event-graph-indexer -- sync --use-keycloak
+cargo run --release -p syncer -- sync --use-keycloak
 
-# Fresh start (deletes the indexer data, loads current ACS, streams from ledger end)
-cargo run --release -p event-graph-indexer -- sync --use-keycloak --fresh
+# Fresh start (deletes the synced data, loads current ACS, streams from ledger end)
+cargo run --release -p syncer -- sync --use-keycloak --fresh
 
 # Fresh start from ~7 days ago (resolves the offset via the Ledger API, implies --fresh)
-cargo run --release -p event-graph-indexer -- sync --use-keycloak --from-days-ago 7
+cargo run --release -p syncer -- sync --use-keycloak --from-days-ago 7
 ```
 
 Options:
@@ -172,10 +172,10 @@ Options:
 - `--profile <name>`: Profile to use (overrides `active_profile`)
 - `--use-keycloak`: Use Keycloak for JWT token management
 - `--access-token <token>`: Provide a static JWT token
-- `--fresh`: Delete the indexer data and start from the current ledger end
+- `--fresh`: Delete the synced data and start from the current ledger end
 - `--from-days-ago <N>`: Fresh start from the offset current ~N days ago. Implies `--fresh`.
 
-`--fresh` deletes the records in the indexer's tables (with `DELETE`); the
+`--fresh` deletes the records in the syncer's tables (with `DELETE`); the
 tables and indexes stay defined, and nothing else in the database is touched.
 
 ### benchmark
@@ -183,7 +183,7 @@ tables and indexes stay defined, and nothing else in the database is touched.
 Measures Canton stream throughput without writing to the database.
 
 ```bash
-cargo run --release -p event-graph-indexer -- benchmark --use-keycloak --count 10000
+cargo run --release -p syncer -- benchmark --use-keycloak --count 10000
 ```
 
 ### print-surql
@@ -191,7 +191,7 @@ cargo run --release -p event-graph-indexer -- benchmark --use-keycloak --count 1
 Prints the SurrealQL writes generated for each update (no database needed).
 
 ```bash
-cargo run --release -p event-graph-indexer -- print-surql \
+cargo run --release -p syncer -- print-surql \
   --access-token <token> \
   --party <party-id> \
   --url <ledger-url> \
@@ -201,10 +201,10 @@ cargo run --release -p event-graph-indexer -- print-surql \
 ## Using the justfile
 
 ```bash
-just indexer-run            # sync with Keycloak
-just indexer-fresh          # fresh start
-just indexer-sandbox        # sync against a local sandbox (fake JWT)
-just indexer-stop           # stop the sync process
+just sync-run            # sync with Keycloak
+just sync-fresh          # fresh start
+just sync-sandbox        # sync against a local sandbox (fake JWT)
+just sync-stop           # stop the sync process
 ```
 
 ## Querying the graph
@@ -228,7 +228,7 @@ WHERE count(<-consumes) = 0 GROUP BY template_name;
 ## Tests
 
 ```bash
-cargo test -p event-graph-indexer
+cargo test -p syncer
 ```
 
 The integration tests in `tests/surreal_integration.rs` start a throwaway
@@ -240,8 +240,8 @@ they never touch real data. They need the `surreal` program on the `PATH` (or
 
 ```
 ┌─────────────────┐    ┌──────────────┐    ┌──────────────┐
-│  Canton Ledger  │───▶│ event-graph- │───▶│  SurrealDB   │◀── graph viewer,
-│  (gRPC Stream)  │    │ indexer      │ ws │  server      │    SurrealDB Studio
+│  Canton Ledger  │───▶│   syncer     │───▶│  SurrealDB   │◀── graph viewer,
+│  (gRPC Stream)  │    │              │ ws │  server      │    SurrealDB Studio
 └─────────────────┘    └──────────────┘    └──────────────┘
         │                     │
         │                     ▼
