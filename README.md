@@ -8,7 +8,7 @@ Why Rust? Because it's not an officially supported client language, and building
 
 ## Prerequisites
 
-- **Daml SDK** `3.4.8+`
+- **Daml SDK** `3.7.1+`
 - **[protoc](https://protobuf.dev/installation/)** (Protocol Buffer Compiler)
 - **Docker Desktop** or **Neo4j Desktop** (for event-graph-indexer and event-graph-ui)
 - **[just](https://github.com/casey/just)** command runner (optional, for convenience recipes)
