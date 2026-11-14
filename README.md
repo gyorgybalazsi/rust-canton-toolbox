@@ -46,6 +46,9 @@ Add protoc to rust-analyzer in `.vscode/settings.json`:
    just sync-run          # against a remote ledger, with Keycloak auth
    ```
 
+   Or open the optional desktop window with `just sync-ui` (see
+   [Desktop window](#desktop-window-optional)).
+
 ## Secrets
 
 Config files never hold secret values. Secret fields use `${VAR}` placeholders
@@ -131,11 +134,58 @@ writes) and `print-surql` (print the SurrealQL writes without a database); see
 the [syncer README](syncer/README.md#commands) for their options and for the
 data model and example queries.
 
+## Desktop window (optional)
+
+`syncer-ui` is a small desktop window, built with [iced](https://iced.rs), for
+people who would rather not remember the recipes. It starts and stops the
+same `syncer` program and shows its log; the syncer itself does not depend on
+it, and a plain `cargo build` at the repository root skips it.
+
+```bash
+just sync-ui                      # builds syncer + syncer-ui, opens the window
+# or, without just:
+cargo build --release -p syncer -p syncer-ui && target/release/syncer-ui
+```
+
+In the window you:
+
+1. **Pick a config file and profile.** It defaults to
+   `syncer/config/config.toml`; if that file doesn't exist yet, *Create from
+   example* copies `config.toml.example`. For the chosen profile it shows the
+   ledger URL, how it signs in (Keycloak when the profile has a `keycloak`
+   section, otherwise the unsigned development token for a local sandbox),
+   the parties, and the SurrealDB target. A missing secret or setting is shown
+   here, before anything starts.
+2. **Choose how to start:** *Resume* (default; continue from the last stored
+   offset), *Fresh start* (delete the synced data, load the current ACS, follow
+   from the ledger end), or *Fresh start from N days ago*. Both fresh starts
+   ask for confirmation, and after a run the choice goes back to *Resume*.
+3. **Start and Stop.** The status line shows whether the syncer is running,
+   for how long, and the latest progress report. Stop sends the same signal as
+   `just sync-stop` and the next *Resume* picks up from the stored offset.
+   Closing the window stops the syncer too.
+
+The log streams into the window (with a warnings-and-errors filter) and is also
+written to `sync.log`, like the recipes do.
+
+The window never asks for or stores secrets. It reads them the way the syncer
+does: from the environment, plus a `.env` file at the repository root (edit it
+and press *Reload*; variables already set in the environment win). `just
+sync-ui` runs under `SECRETS_RUNNER` like the other recipes, so a secret
+manager prefix works too.
+
+It runs the `syncer` program next to its own executable (both land in
+`target/release/`). Set `SYNCER_BIN` to use another one; if neither exists, it
+falls back to `cargo run --release -p syncer`. On Linux it needs the usual
+desktop libraries (X11 or Wayland, `libxkbcommon`), which desktop
+installations already have.
+
 ## Workspace Crates
 
 | Crate | Type | Description |
 |-------|------|-------------|
 | **syncer** | bin/lib | Streams Canton events into SurrealDB as a graph, with resilient sync, batching, and nested contract arguments |
+| **syncer-ui** | bin | Optional desktop window (iced) to start and stop the syncer and follow its log |
 | **ledger-api** | lib | Generated Protobuf/gRPC bindings for the Daml Ledger API v2 |
 | **client** | bin/lib | CLI and library wrapping Ledger API operations (streaming, JWT, party management) |
 | **daml-type-rep** | lib | Type representations for Daml values (built-in types, numeric scaling, template IDs) |

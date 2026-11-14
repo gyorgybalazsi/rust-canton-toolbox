@@ -37,6 +37,11 @@ sync-sandbox-fresh:
 sync-stop:
     pkill -x syncer || true
 
+# Open the optional desktop window to start and stop the sync (builds both programs)
+sync-ui:
+    cargo build --release -p syncer -p syncer-ui
+    {{secrets_runner}} target/release/syncer-ui
+
 # Look up a single update (transaction) by its ID
 get-update update_id profile="mainnet":
     {{secrets_runner}} \
